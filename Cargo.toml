@@ -1,6 +1,6 @@
 [package]
 name = "oscquery"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Implementation of OSCQuery Proposal"
 license = "MIT OR Apache-2.0"
@@ -17,3 +17,7 @@ axum-server = "0.7"
 [dev-dependencies]
 ctrlc = "3.4"
 rand = "0.8"
+
+[[example]]
+name = "server"
+path = "examples/server.rs"
