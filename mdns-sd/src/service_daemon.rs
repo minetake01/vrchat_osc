@@ -2273,7 +2273,7 @@ impl Zeroconf {
                     }
                 }
 
-                if qtype == RRType::A || qtype == RRType::AAAA || qtype == RRType::ANY {
+                if qtype == RRType::A || qtype == RRType::AAAA {
                     for service in self.my_services.values() {
                         if service.get_status(intf) != ServiceStatus::Announced {
                             continue;
@@ -2339,7 +2339,7 @@ impl Zeroconf {
                     continue;
                 }
 
-                if qtype == RRType::SRV || qtype == RRType::ANY {
+                if qtype == RRType::SRV {
                     out.add_answer(
                         &msg,
                         DnsSrv::new(
@@ -2352,9 +2352,26 @@ impl Zeroconf {
                             service.get_hostname().to_string(),
                         ),
                     );
+                    let intf_addrs = service.get_addrs_on_intf(intf);
+                    if intf_addrs.is_empty() {
+                        debug!(
+                            "Cannot find valid addrs for TYPE_SRV response on intf {:?}",
+                            &intf
+                        );
+                        return;
+                    }
+                    for address in intf_addrs {
+                        out.add_additional_answer(DnsAddress::new(
+                            service.get_hostname(),
+                            ip_address_rr_type(&address),
+                            CLASS_IN | CLASS_CACHE_FLUSH,
+                            service.get_host_ttl(),
+                            address,
+                        ));
+                    }
                 }
 
-                if qtype == RRType::TXT || qtype == RRType::ANY {
+                if qtype == RRType::TXT {
                     out.add_answer(
                         &msg,
                         DnsTxt::new(
@@ -2366,7 +2383,37 @@ impl Zeroconf {
                     );
                 }
 
-                if qtype == RRType::SRV {
+                if qtype == RRType::ANY {
+                    out.add_answer(
+                        &msg, 
+                        DnsPointer::new(
+                            question.entry_name(),
+                            RRType::PTR,
+                            CLASS_IN,
+                            service.get_other_ttl(),
+                            service.get_type().to_string(),
+                        ),
+                    );
+
+                    out.add_additional_answer(
+                        DnsSrv::new(
+                            service.get_type(),
+                            CLASS_IN | CLASS_CACHE_FLUSH,
+                            service.get_other_ttl(),
+                            service.get_priority(),
+                            service.get_weight(),
+                            service.get_port(),
+                            service.get_hostname().to_string(),
+                        ),
+                    );
+                    out.add_additional_answer(
+                        DnsTxt::new(
+                            service.get_type(),
+                            CLASS_IN | CLASS_CACHE_FLUSH,
+                            service.get_other_ttl(),
+                            service.generate_txt(),
+                        ),
+                    );
                     let intf_addrs = service.get_addrs_on_intf(intf);
                     if intf_addrs.is_empty() {
                         debug!(
@@ -3271,7 +3318,8 @@ fn prepare_announce(
     if !info.requires_probe()
         || dns_registry.is_probing_done(&srv, info.get_fullname(), create_time)
     {
-        out.add_answer_at_time(srv, 0);
+        // out.add_answer_at_time(srv, 0);
+        out.add_additional_answer(srv);
     } else {
         probing_count += 1;
     }
@@ -3292,7 +3340,8 @@ fn prepare_announce(
     if !info.requires_probe()
         || dns_registry.is_probing_done(&txt, info.get_fullname(), create_time)
     {
-        out.add_answer_at_time(txt, 0);
+        // out.add_answer_at_time(txt, 0);
+        out.add_additional_answer(txt);
     } else {
         probing_count += 1;
     }
@@ -3316,7 +3365,8 @@ fn prepare_announce(
         if !info.requires_probe()
             || dns_registry.is_probing_done(&dns_addr, info.get_fullname(), create_time)
         {
-            out.add_answer_at_time(dns_addr, 0);
+            // out.add_answer_at_time(dns_addr, 0);
+            out.add_additional_answer(dns_addr);
         } else {
             probing_count += 1;
         }
