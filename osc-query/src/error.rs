@@ -1,5 +1,5 @@
-use std::fmt;
 use std::error::Error;
+use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum OscQueryError {
@@ -46,8 +46,12 @@ impl fmt::Display for OscQueryError {
             OscQueryError::IOError(msg) => write!(f, "I/O error: {}", msg),
             OscQueryError::ParseError(msg) => write!(f, "Parse error: {}", msg),
             OscQueryError::InvalidWebSocketCommand => write!(f, "Invalid WebSocket command"),
-            OscQueryError::UnsupportedFeature(feature) => write!(f, "Unsupported feature: {}", feature),
-            OscQueryError::UnexpectedServerResponse(msg) => write!(f, "Unexpected server response: {}", msg),
+            OscQueryError::UnsupportedFeature(feature) => {
+                write!(f, "Unsupported feature: {}", feature)
+            }
+            OscQueryError::UnexpectedServerResponse(msg) => {
+                write!(f, "Unexpected server response: {}", msg)
+            }
         }
     }
 }
