@@ -9,11 +9,10 @@ thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
-mdns-sd = "0.13"
+mdns-sd = { path = "mdns-sd" }
 rosc = "~0.10"
+oscquery = { path = "osc-query" }
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
-
-[dev-dependencies]
-env_logger = "0.11"
+convert_case = "0.7"
