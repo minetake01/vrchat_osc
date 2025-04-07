@@ -15,3 +15,6 @@ Contributions are welcome! Please follow these steps:
 2. Create a new branch for your changes.  
 3. Submit a pull request with a clear description of your modifications.  
 By contributing, you agree that your code will be licensed under MIT OR Apache-2.0.  
+
+## Acknowledgements
+The data models defined in `vrchat_osc::oscquery::models::*` are implemented with reference to [tychedelia/osc-query](https://github.com/tychedelia/osc-query).

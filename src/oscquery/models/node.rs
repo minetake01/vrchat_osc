@@ -1,9 +1,6 @@
-//! OSCQuery node types and related structures.
-use crate::error::OscQueryError;
 use serde::de::{Error, Visitor};
 use serde::ser::SerializeSeq;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::json;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -17,43 +14,34 @@ impl OscRootNode {
         Self {
             root: OscNode {
                 full_path: "/".to_string(),
-                description: Some("root node".to_string()),
                 ..Default::default()
             },
         }
     }
 
-    pub fn avatar_parameters() -> Self {
-        Self::new()
-            .add_node(OscNode {
-                full_path: "/avatar/parameters".to_string(),
-                description: Some("Avatar parameters".to_string()),
-                ..Default::default()
-            })
+    pub fn with_avatar(mut self) -> Self {
+        self.add_node(OscNode {
+            full_path: "/avatar".to_string(),
+            ..Default::default()
+        })
     }
 
-    pub fn tracking_data() -> Self {
-        Self::new()
-            .add_node(OscNode {
-                full_path: "/tracking/vrsystem".to_string(),
-                description: Some("Tracking data".to_string()),
-                ..Default::default()
-            })
+    pub fn with_tracking(mut self) -> Self {
+        self.add_node(OscNode {
+            full_path: "/tracking".to_string(),
+            ..Default::default()
+        })
     }
 
-    pub fn dolly() -> Self {
-        Self::new()
-            .add_node(OscNode {
-                full_path: "/dolly".to_string(),
-                description: Some("Dolly".to_string()),
-                ..Default::default()
-            })
-    }
-    
-    pub fn root(&self) -> &OscNode {
-        &self.root
+    pub fn with_dolly(mut self) -> Self {
+        self.add_node(OscNode {
+            full_path: "/dolly".to_string(),
+            ..Default::default()
+        })
     }
 
+    /// Get the node at the specified path.
+    /// Returns `None` if the node does not exist.
     pub fn get_node(&self, path: &str) -> Option<&OscNode> {
         let mut current = &self.root;
         for part in path.split('/').filter(|p| !p.is_empty()) {
@@ -62,13 +50,12 @@ impl OscRootNode {
         Some(current)
     }
 
+    /// Add a node to the tree.
+    /// If a node already exists at the specified path, it will be replaced.
     pub fn add_node(mut self, node: OscNode) -> Self {
         let mut current = &mut self.root;
         let mut path = vec![];
-        for part in node.full_path.split('/') {
-            if part.is_empty() {
-                continue;
-            }
+        for part in node.full_path.split('/').filter(|p| !p.is_empty()) {
             path.push(part);
             current = current.contents.entry(part.to_string()).or_insert(OscNode {
                 full_path: format!("/{}", path.join("/")),
@@ -79,6 +66,8 @@ impl OscRootNode {
         self
     }
 
+    /// Remove a node from the tree.
+    /// Returns the removed node if it exists, or `None` if it does not.
     pub fn remove_node(&mut self, path: &str) -> Option<OscNode> {
         let mut parts = path.split('/').filter(|p| !p.is_empty());
         let mut last_branch: *mut OscNode = &mut self.root;
@@ -99,17 +88,8 @@ impl OscRootNode {
             (*last_branch).contents.remove(last_branch_key)
         }
     }
-
-    pub fn to_json(&self) -> serde_json::Value {
-        self.root.to_json()
-    }
-
-    pub fn from_json(value: serde_json::Value) -> Result<OscRootNode, OscQueryError> {
-        OscNode::from_json(value).map(|root| OscRootNode { root })
-    }
 }
 
-/// An OSCQuery node.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub struct OscNode {
@@ -138,24 +118,6 @@ pub struct OscNode {
     /// The range of acceptable values for this node.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub range: Option<Vec<RangeInfo>>,
-}
-
-impl OscNode {
-    pub fn get_node_with_relative_path(&self, path: &str) -> Option<&OscNode> {
-        let mut current = self;
-        for part in path.split('/').filter(|p| !p.is_empty()) {
-            current = current.contents.get(part)?;
-        }
-        Some(current)
-    }
-
-    pub fn to_json(&self) -> serde_json::Value {
-        json!(self)
-    }
-
-    pub fn from_json(value: serde_json::Value) -> Result<OscNode, OscQueryError> {
-        serde_json::from_value(value).map_err(|_| OscQueryError::DeserializationError)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -539,10 +501,10 @@ pub struct RangeInfo {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessMode {
-    None = 0,
-    ReadOnly = 1,
-    WriteOnly = 2,
-    ReadWrite = 3,
+    None,
+    ReadOnly,
+    WriteOnly,
+    ReadWrite,
 }
 
 impl Default for AccessMode {

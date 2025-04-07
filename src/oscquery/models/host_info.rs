@@ -36,9 +36,3 @@ pub enum OSCTransport {
     UDP,
     TCP,
 }
-
-impl Default for OSCTransport {
-    fn default() -> Self {
-        OSCTransport::UDP
-    }
-}
