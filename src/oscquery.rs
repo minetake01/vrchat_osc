@@ -85,7 +85,7 @@ impl OscQuery {
         // It handles requests to the root ("/") and any other path ("/{*path}").
         let app = Router::new()
             .route("/", get(handle_root)) // Route for the root path.
-            .route("/*path", get(handle_path)) // Route for any sub-path. Note: AxumPath uses `*` for catch-all.
+            .route("/{*path}", get(handle_path)) // Route for any sub-path. Note: AxumPath uses `*` for catch-all.
             .with_state(shared_state); // Provide the shared state to handlers.
 
         // Create a oneshot channel for graceful shutdown signaling.
