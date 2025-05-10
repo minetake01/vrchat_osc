@@ -1,37 +1,46 @@
-use oscquery::models::{OscRootNode, OscValue};
-use rosc::OscPacket;
-use vrchat_osc::VRChatOSC;
+use vrchat_osc::{models::OscRootNode, VRChatOSC, Error};
+use rosc::{OscMessage, OscPacket};
+use tokio;
 
 #[tokio::main]
-async fn main() {
-    let mut vrchat_osc = VRChatOSC::new().unwrap();
+async fn main() -> Result<(), Error> {
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Debug)
+        .init();
 
-    println!("Registering service...");
-    vrchat_osc.register_service("MyTool", OscRootNode::avatar_parameters(), |packet| {
+    // Initialize VRChatOSC instance
+    let mut vrchat_osc = VRChatOSC::new().await?;
+
+    vrchat_osc.on_connect(|name, addr| {
+        println!("Connected to VRChat OSC server: {:?} at {:?}", name, addr);
+    }).await;
+
+    // Register a test service
+    let root_node = OscRootNode::new().with_avatar();
+    vrchat_osc.register("test_service", root_node, |packet| {
         if let OscPacket::Message(msg) = packet {
-            if msg.addr == "/avatar/parameters/MuteSelf" {
-                println!("Received: {:?}", msg.args);
-            }
+            println!("Received OSC message: {:?}", msg);
         }
-    }).await.unwrap();
-    
-    println!("Getting parameters...");
-    let Ok(parameters) = vrchat_osc.get_parameter("/avatar/change").await else {
-        println!("Please run this example while connected to VRChat.");
-        return;
+    }).await?;
+    println!("Service registered.");
+
+    // Send a test OSC message
+    let msg = OscMessage {
+        addr: "/avatar/parameters/TestParam".to_string(),
+        args: vec![rosc::OscType::Float(1.0)],
     };
-    let OscValue::String(value) = parameters.value.clone().unwrap()[0].clone() else { return; };
-    println!("Your current avatar is: {}", value);
+    vrchat_osc.send(OscPacket::Message(msg), "VRChat-Client-*").await?;
+    println!("Test OSC message sent.");
 
-    println!("Sending message...");
-    let osc_packet = rosc::OscPacket::Message(rosc::OscMessage {
-        addr: "/chatbox/input".to_string(),
-        args: vec![
-            rosc::OscType::String("Hello, world!".to_string()),
-            rosc::OscType::Bool(true),
-        ],
-    });
-    vrchat_osc.send(osc_packet).await.unwrap();
+    // Get current parameters
+    let params = vrchat_osc.get_parameter("/avatar/parameters", "VRChat-Client-*").await?;
+    for (name, node) in params {
+        println!("Parameter: {:?}, Node: {:?}", name, node);
+    }
 
-    vrchat_osc.join().await.unwrap();
+    // Keep the program running to handle incoming messages
+    println!("Press Ctrl+C to exit.");
+    tokio::signal::ctrl_c().await?;
+
+    Ok(())
 }
