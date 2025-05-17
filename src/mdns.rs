@@ -30,11 +30,8 @@ const MDNS_TTL: u32 = 255;
 /// Error types that can occur during mDNS operations.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    /// Errors from the underlying DNS library (hickory-proto).
     #[error("DNS Protocol Error: {0}")]
     MdnsProtoError(#[from] hickory_proto::ProtoError),
-
-    /// I/O errors during network operations.
     #[error("I/O Error: {0}")]
     IoError(#[from] std::io::Error),
 

@@ -4,7 +4,6 @@ mod fetch;
 
 pub use oscquery::*;
 
-
 use crate::fetch::fetch;
 
 use std::{
@@ -35,18 +34,8 @@ pub enum Error {
     MdnsError(#[from] mdns::Error),
     #[error("Hickory DNS protocol error: {0}")]
     HickoryError(#[from] hickory_proto::ProtoError),
-    #[error("Hyper HTTP client/server error: {0}")]
-    HyperError(#[from] hyper::Error),
-    #[error("HTTP library error: {0}")]
-    HttpError(#[from] hyper::http::Error),
-    #[error("Serde JSON serialization/deserialization error: {0}")]
-    SerdeError(#[from] serde_json::Error),
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
-    #[error("Tokio task join error: {0}")]
-    JoinError(#[from] tokio::task::JoinError),
-    #[error("Fetch operation error: {0}")]
-    FetchError(#[from] fetch::Error),
 }
 
 /// Holds handles related to a registered OSC service.

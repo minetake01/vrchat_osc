@@ -113,7 +113,6 @@ pub fn convert_to_message(instance_name: &Name, addr: SocketAddr) -> Message {
     message
 }
 
-
 /// Extracts service instance information (name, IP address, port) from a received mDNS `Message`.
 ///
 /// This function is designed to parse the specific mDNS packet format that `convert_to_message` creates.

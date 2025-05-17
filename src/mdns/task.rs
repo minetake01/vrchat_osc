@@ -200,7 +200,6 @@ async fn handle_query(
     }
 }
 
-
 /// Handles an incoming mDNS response message.
 ///
 /// It extracts service information (instance name, address, port) from PTR, SRV,
