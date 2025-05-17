@@ -142,7 +142,7 @@ async fn handle_root(
 /// Axum handler for requests to any path ("/{*path}").
 /// Returns information about the OSC node at the requested path or specific attributes.
 async fn handle_path(
-    AxumPath(path_str): AxumPath<String>,              // The requested path string (e.g., "avatar/parameters/ jakiśParametr").
+    AxumPath(path_str): AxumPath<String>,              // The requested path string (e.g., "avatar/parameters/SomeParameter").
     Query(params): Query<HashMap<String, String>>, // Query parameters from the URL.
     State(state): State<Arc<OscQueryState>>,       // Shared server state.
 ) -> impl IntoResponse {

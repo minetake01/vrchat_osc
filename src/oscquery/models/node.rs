@@ -54,7 +54,7 @@ impl OscRootNode {
     /// Retrieves a reference to an `OscNode` at the specified path.
     ///
     /// # Arguments
-    /// * `path` - The full OSC path (e.g., "/avatar/parameters/ jakiśParametr").
+    /// * `path` - The full OSC path (e.g., "/avatar/parameters/SomeParameter").
     ///
     /// # Returns
     /// An `Option<&OscNode>`: `Some(&node)` if found, `None` otherwise.
@@ -460,7 +460,6 @@ pub enum OscValue {
     Array(Vec<OscValue>), // For OSC arrays.
     Nil, // Represents OSC Nil. Serializes to JSON null.
 }
-
 
 /// Represents range information for an OSC node's value.
 /// Can specify a min/max range or a list of discrete allowed values.
