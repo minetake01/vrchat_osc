@@ -48,8 +48,8 @@ struct ServiceHandle {
 
 /// Main struct for managing VRChat OSC services, discovery, and communication.
 pub struct VRChatOSC {
-    /// Arc-wrapped RwLock for thread-safe access to the mDNS client.
-    mdns: Arc<RwLock<mdns::Mdns>>,
+    /// mDNS client instance for service discovery.
+    mdns: mdns::Mdns,
     /// Stores registered service handles, mapping service name to its handle.
     service_handles: HashMap<String, ServiceHandle>,
     /// Callback function to be executed when a new mDNS service is discovered.
@@ -91,7 +91,7 @@ impl VRChatOSC {
         });
         
         Ok(VRChatOSC {
-            mdns: Arc::new(RwLock::new(mdns_client)),
+            mdns: mdns_client,
             service_handles: Default::default(),
             on_service_discovered_callback,
         })
@@ -165,21 +165,17 @@ impl VRChatOSC {
         let osc_query_local_addr = osc_query.serve(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).await?;
 
         // Create mDNS service announcements.
-        // Lock the mDNS client for reading (as register might internally need to write, but here we only read its Arc).
-        let mdns_guard = self.mdns.read().await;
         let service_name_upper_camel = service_name.to_case(Case::UpperCamel); // Convert service name case.
         
         // Register the OSC and OSCQuery services with mDNS.
-        mdns_guard.register(
+        self.mdns.register(
             Name::from_ascii(format!("{}._osc._udp.local.", service_name_upper_camel))?,
             osc_local_addr,
         ).await?;
-        mdns_guard.register(
+        self.mdns.register(
             Name::from_ascii(format!("{}._oscjson._tcp.local.", service_name_upper_camel))?,
             osc_query_local_addr,
         ).await?;
-        // Drop the read guard explicitly to release the lock sooner.
-        drop(mdns_guard);
 
         // Save service handles for later management (e.g., unregistering).
         self.service_handles.insert(service_name.to_string(), ServiceHandle {
@@ -198,11 +194,9 @@ impl VRChatOSC {
         let service_name_upper_camel = service_name.to_case(Case::UpperCamel);
         // Remove the service from our tracking.
         if let Some(mut service_handles) = self.service_handles.remove(service_name) {
-            let mdns_guard = self.mdns.read().await;
             // Unregister from mDNS.
-            mdns_guard.unregister(Name::from_ascii(format!("{}._osc._udp.local.", service_name_upper_camel))?).await?;
-            mdns_guard.unregister(Name::from_ascii(format!("{}._oscjson._tcp.local.", service_name_upper_camel))?).await?;
-            drop(mdns_guard);
+            self.mdns.unregister(Name::from_ascii(format!("{}._osc._udp.local.", service_name_upper_camel))?).await?;
+            self.mdns.unregister(Name::from_ascii(format!("{}._oscjson._tcp.local.", service_name_upper_camel))?).await?;
             
             // Stop the associated tasks/servers.
             service_handles.osc.abort(); // Abort the OSC listening task.
@@ -218,14 +212,12 @@ impl VRChatOSC {
     /// * `to` - A glob pattern (e.g., "VRChat-Client-*") to match against service names.
     ///          This matches against the service instance name found via mDNS.
     pub async fn send(&self, packet: OscPacket, to: &str) -> Result<(), Error> {
-        let mdns_guard = self.mdns.read().await;
         // Find services matching the pattern. The matching logic is within `find_service`.
         // The closure provided to `find_service` determines if a service (by its Name) matches.
-        let services = mdns_guard.find_service(|name, _| {
+        let services = self.mdns.find_service(|name, _| {
             // `WildMatch` performs glob-style pattern matching.
-            WildMatch::new(to).matches(&name.to_ascii())
+            WildMatch::new(&format!("{}._osc._udp.local.", to)).matches(&name.to_ascii())
         }).await;
-        drop(mdns_guard);
 
         if services.is_empty() {
             log::warn!("No mDNS services found matching the expression: {}", to);
@@ -249,23 +241,21 @@ impl VRChatOSC {
     ///
     /// # Arguments
     /// * `method` - The OSC path of the parameter to fetch (e.g., "/avatar/parameters/SomeParam").
-    /// * `to` - A glob pattern (e.g., "VRChat-Client-*") to match against service names.
+    /// * `from` - A glob pattern (e.g., "VRChat-Client-*") to match against service names.
     ///          This matches against the service instance name found via mDNS.
     ///
     /// # Returns
     /// A `Vec` of tuples, where each tuple contains the service `Name` and the fetched `OscNode`.
     /// Returns an empty Vec if no services match or if fetching fails for all matched services.
-    pub async fn get_parameter(&self, method: &str, to: &str) -> Result<Vec<(Name, OscNode)>, Error> {
-        let mdns_guard = self.mdns.read().await;
+    pub async fn get_parameter(&self, method: &str, from: &str) -> Result<Vec<(Name, OscNode)>, Error> {
         // Find services matching the pattern. The matching logic is within `find_service`.
         // The closure provided to `find_service` determines if a service (by its Name) matches.
-        let services = mdns_guard.find_service(|name, _| {
-            WildMatch::new(to).matches(&name.to_ascii())
+        let services = self.mdns.find_service(|name, _| {
+            WildMatch::new(&format!("{}._oscjson._tcp.local.", from)).matches(&name.to_ascii())
         }).await;
-        drop(mdns_guard);
 
         if services.is_empty() {
-            log::warn!("No mDNS services found for get_parameter matching expression: {}", to);
+            log::warn!("No mDNS services found for get_parameter matching expression: {}", from);
             return Ok(Vec::new());
         }
 
