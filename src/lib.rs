@@ -51,7 +51,7 @@ pub struct VRChatOSC {
     /// mDNS client instance for service discovery.
     mdns: mdns::Mdns,
     /// Stores registered service handles, mapping service name to its handle.
-    service_handles: HashMap<String, ServiceHandle>,
+    service_handles: Arc<RwLock<HashMap<String, ServiceHandle>>>,
     /// Callback function to be executed when a new mDNS service is discovered.
     /// The Name is the service instance name, and SocketAddr is its resolved address.
     on_service_discovered_callback: Arc<RwLock<Option<Arc<dyn Fn(Name, SocketAddr) + Send + Sync + 'static>>>>,
@@ -92,7 +92,7 @@ impl VRChatOSC {
         
         Ok(VRChatOSC {
             mdns: mdns_client,
-            service_handles: Default::default(),
+            service_handles: Arc::new(RwLock::new(HashMap::new())),
             on_service_discovered_callback,
         })
     }
@@ -117,7 +117,7 @@ impl VRChatOSC {
     /// * `parameters` - The root node of the OSC address space for this service.
     /// * `handler` - A function that will be called when an OSC packet is received for this service.
     ///               It must be `Fn(OscPacket) + Send + 'static`.
-    pub async fn register<F>(&mut self, service_name: &str, parameters: OscRootNode, handler: F) -> Result<(), Error>
+    pub async fn register<F>(&self, service_name: &str, parameters: OscRootNode, handler: F) -> Result<(), Error>
     where
         F: Fn(OscPacket) + Send + 'static,
     {
@@ -178,7 +178,8 @@ impl VRChatOSC {
         ).await?;
 
         // Save service handles for later management (e.g., unregistering).
-        self.service_handles.insert(service_name.to_string(), ServiceHandle {
+        let mut handles = self.service_handles.write().await;
+        handles.insert(service_name.to_string(), ServiceHandle {
             osc: osc_handle,
             osc_query,
         });
@@ -190,17 +191,18 @@ impl VRChatOSC {
     ///
     /// # Arguments
     /// * `service_name` - The name of the service to unregister.
-    pub async fn unregister(&mut self, service_name: &str) -> Result<(), Error> {
+    pub async fn unregister(&self, service_name: &str) -> Result<(), Error> {
         let service_name_upper_camel = service_name.to_case(Case::UpperCamel);
         // Remove the service from our tracking.
-        if let Some(mut service_handles) = self.service_handles.remove(service_name) {
+        let mut service_handles_map = self.service_handles.write().await;
+        if let Some(mut service_handle_entry) = service_handles_map.remove(service_name) {
             // Unregister from mDNS.
             self.mdns.unregister(Name::from_ascii(format!("{}._osc._udp.local.", service_name_upper_camel))?).await?;
             self.mdns.unregister(Name::from_ascii(format!("{}._oscjson._tcp.local.", service_name_upper_camel))?).await?;
             
             // Stop the associated tasks/servers.
-            service_handles.osc.abort(); // Abort the OSC listening task.
-            service_handles.osc_query.shutdown(); // Gracefully shutdown the OSCQuery server.
+            service_handle_entry.osc.abort(); // Abort the OSC listening task.
+            service_handle_entry.osc_query.shutdown(); // Gracefully shutdown the OSCQuery server.
         }
         Ok(())
     }
@@ -281,16 +283,56 @@ impl VRChatOSC {
 
         Ok(params)
     }
+
+    /// Shuts down all registered services and cleans up resources.
+    /// This method should be called before the VRChatOSC instance is dropped
+    /// to ensure graceful shutdown of asynchronous tasks and network services.
+    pub async fn shutdown(&self) -> Result<(), Error> {
+        let mut service_handles_map = self.service_handles.write().await;
+        let service_names: Vec<String> = service_handles_map.keys().cloned().collect();
+        
+        for name in service_names {
+            if let Some(mut handle) = service_handles_map.remove(&name) {
+                let service_name_upper_camel = name.to_case(Case::UpperCamel);
+                // Attempt to unregister from mDNS. Errors are logged but not propagated to allow other services to shut down.
+                if let Err(e) = self.mdns.unregister(Name::from_ascii(format!("{}._osc._udp.local.", service_name_upper_camel))?).await {
+                    log::error!("Failed to unregister OSC for {}: {}", name, e);
+                }
+                if let Err(e) = self.mdns.unregister(Name::from_ascii(format!("{}._oscjson._tcp.local.", service_name_upper_camel))?).await {
+                    log::error!("Failed to unregister OSCQuery for {}: {}", name, e);
+                }
+                
+                handle.osc.abort();
+                handle.osc_query.shutdown();
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Drop for VRChatOSC {
     fn drop(&mut self) {
-        // Perform synchronous cleanup
-        let service_names: Vec<String> = self.service_handles.keys().cloned().collect();
-        for name in service_names {
-            if let Some(mut service_handles) = self.service_handles.remove(&name) {
-                service_handles.osc.abort();
-                service_handles.osc_query.shutdown();
+        // Best-effort synchronous cleanup.
+        // For robust cleanup, especially of async tasks and network resources,
+        // the asynchronous `shutdown` method should be called explicitly.
+        if let Ok(mut handles) = self.service_handles.try_write() {
+            let service_names: Vec<String> = handles.keys().cloned().collect();
+            for name in service_names {
+                if let Some(mut service_handle) = handles.remove(&name) {
+                    // mDNS unregistration cannot be reliably called here due to async and potential blocking.
+                    service_handle.osc.abort();
+                    // OscQuery::shutdown() is assumed to be synchronous or non-blocking here.
+                    // If it's async, it cannot be .await-ed in drop.
+                    service_handle.osc_query.shutdown();
+                }
+            }
+        } else {
+            // This might happen if the lock is poisoned or contended in a way not suitable for drop.
+            // In a real application, this should be logged or handled appropriately.
+            // Using log::error! or eprintln! here might be appropriate.
+            // For now, we acknowledge that proper async shutdown is preferred.
+            if !std::thread::panicking() { // Avoid double panic if already panicking
+                 log::warn!("VRChatOSC: Could not acquire lock on service_handles during drop. Explicitly call shutdown() for robust cleanup.");
             }
         }
     }
