@@ -100,6 +100,7 @@ pub async fn server_task(
                 handle_response(
                     message,
                     &notifier_tx,
+                    &registered_services,
                     &service_cache,
                     &follow_services,
                 )
@@ -215,6 +216,7 @@ async fn handle_query(
 async fn handle_response(
     response_message: Message,
     notifier_tx: &mpsc::Sender<(Name, SocketAddr)>,
+    registered_services: &Arc<RwLock<HashMap<Name, HashMap<Name, SocketAddr>>>>,
     service_cache: &Arc<RwLock<HashMap<Name, SocketAddr>>>,
     follow_services: &Arc<RwLock<HashSet<Name>>>,
 ) {
@@ -235,10 +237,13 @@ async fn handle_response(
 
         let is_following: bool = {
             let follow_guard = follow_services.read().await;
-            follow_guard.is_empty() || follow_guard.contains(&service_type_name)
+            let registered_services_guard = registered_services.read().await;
+            follow_guard.contains(&service_type_name)
+                && !registered_services_guard.get(&service_type_name).map_or(false, |instances| {
+                    instances.contains_key(&discovered_instance_name)   // Check if the instance is owned by us
+                })
         };
 
-        let mut should_notify = false;
         if is_following {
             // Update the service cache.
             let mut cache_guard = service_cache.write().await;
@@ -251,7 +256,16 @@ async fn handle_response(
                     "Service cache updated for: {} at {} (was {:?})",
                     discovered_instance_name, discovered_addr, old_value
                 );
-                should_notify = true;
+
+                // If the service was newly added or updated, and we are following its type, notify listeners.
+                if let Err(e) = notifier_tx.send((discovered_instance_name.clone(), discovered_addr)).await {
+                    log::error!(
+                        "Failed to send notification for discovered service {}: {}",
+                        discovered_instance_name, e
+                    );
+                } else {
+                    log::debug!("Sent notification for service: {}", discovered_instance_name);
+                }
             } else {
                 log::debug!(
                     "Service cache already up-to-date for: {} at {}",
@@ -263,20 +277,6 @@ async fn handle_response(
                 "Ignoring discovered service {} of type {} because not followed.",
                 discovered_instance_name, service_type_name
             );
-            return; // Not interested in this service type.
-        }
-
-
-        // If the service was newly added or updated, and we are following its type, notify listeners.
-        if should_notify {
-            if let Err(e) = notifier_tx.send((discovered_instance_name.clone(), discovered_addr)).await {
-                log::error!(
-                    "Failed to send notification for discovered service {}: {}",
-                    discovered_instance_name, e
-                );
-            } else {
-                log::debug!("Sent notification for service: {}", discovered_instance_name);
-            }
         }
     } else {
         // This means the response message did not contain the expected set of records
