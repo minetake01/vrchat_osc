@@ -50,7 +50,7 @@ pub async fn setup_multicast_socket(if_index: u32, addr: IpAddr) -> Result<UdpSo
 /// # Returns
 /// A `Result` containing the number of bytes sent, or an `std::io::Error` if sending fails.
 pub async fn send_to_mdns(
-    socket: &Arc<UdpSocket>,
+    socket: &UdpSocket,
     bytes: &[u8],
 ) -> Result<usize, std::io::Error> {
     let local_addr = socket.local_addr()?; // Get the local address of the socket

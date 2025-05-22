@@ -90,7 +90,7 @@ pub async fn server_task(
                 // Handle incoming mDNS queries.
                 handle_query(
                     message,
-                    &socket,
+                    socket.clone(),
                     &registered_services,
                 )
                 .await;
@@ -121,7 +121,7 @@ pub async fn server_task(
 /// * `registered_services` - Read-only access to the map of locally registered services.
 async fn handle_query(
     query_message: Message,
-    socket: &Arc<UdpSocket>,
+    socket: Arc<UdpSocket>,
     registered_services: &Arc<RwLock<HashMap<Name, HashMap<Name, SocketAddr>>>>,
 ) {
     // Iterate over each query in the mDNS message.
@@ -155,7 +155,7 @@ async fn handle_query(
                     let response = convert_to_message(instance_name, addr);
                     match response.to_bytes() {
                         Ok(bytes) => {
-                            if let Err(e) = send_to_mdns(socket, &bytes).await {
+                            if let Err(e) = send_to_mdns(&socket, &bytes).await {
                                 log::error!("Failed to send response for instance {}: {}", instance_name, e);
                             }
                         }
@@ -186,7 +186,7 @@ async fn handle_query(
                     let response = convert_to_message(query.name(), addr); // Use query.name() as it's the instance name
                     match response.to_bytes() {
                         Ok(bytes) => {
-                            if let Err(e) = send_to_mdns(socket, &bytes).await {
+                            if let Err(e) = send_to_mdns(&socket, &bytes).await {
                                 log::error!("Failed to send response for instance {}: {}", query.name(), e);
                             }
                         }
