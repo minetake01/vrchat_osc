@@ -69,7 +69,7 @@ pub struct VRChatOSC {
 impl VRChatOSC {
     /// Creates a new `VRChatOSC` instance.
     /// Initializes mDNS, sets up service discovery, and starts a listener task for mDNS service notifications.
-    pub async fn new() -> Result<VRChatOSC, Error> {
+    pub async fn new() -> Result<Arc<VRChatOSC>, Error> {
         // Create an mpsc channel for notifying about discovered mDNS services.
         let (discover_notifier_tx, mut discover_notifier_rx) = mpsc::channel(8);
         
@@ -102,12 +102,12 @@ impl VRChatOSC {
                 }
             }
         });
-        
-        Ok(VRChatOSC {
+
+        Ok(Arc::new(VRChatOSC {
             mdns: mdns_client,
             service_handles: Arc::new(RwLock::new(HashMap::new())),
             on_service_discovered_callback,
-        })
+        }))
     }
 
     /// Registers a callback function to be invoked when an mDNS service is discovered.
