@@ -46,6 +46,13 @@ struct ServiceHandle {
     osc_query: OscQuery,
 }
 
+pub enum ServiceType {
+    /// OSC service type.
+    Osc(Name, SocketAddr),
+    /// OSCQuery service type.
+    OscQuery(Name, SocketAddr),
+}
+
 /// Main struct for managing VRChat OSC services, discovery, and communication.
 pub struct VRChatOSC {
     /// mDNS client instance for service discovery.
@@ -54,7 +61,7 @@ pub struct VRChatOSC {
     service_handles: Arc<RwLock<HashMap<String, ServiceHandle>>>,
     /// Callback function to be executed when a new mDNS service is discovered.
     /// The Name is the service instance name, and SocketAddr is its resolved address.
-    on_service_discovered_callback: Arc<RwLock<Option<Arc<dyn Fn(Name, SocketAddr) + Send + Sync + 'static>>>>,
+    on_service_discovered_callback: Arc<RwLock<Option<Arc<dyn Fn(ServiceType) + Send + Sync + 'static>>>>,
 }
 
 impl VRChatOSC {
@@ -72,7 +79,7 @@ impl VRChatOSC {
         let _ = mdns_client.follow(Name::from_ascii("_oscjson._tcp.local.")?).await;
         
         // Prepare a shared storage for the service discovered callback.
-        let on_service_discovered_callback = Arc::new(RwLock::new(None::<Arc<dyn Fn(Name, SocketAddr) + Send + Sync + 'static>>));
+        let on_service_discovered_callback = Arc::new(RwLock::new(None::<Arc<dyn Fn(ServiceType) + Send + Sync + 'static>>));
         let callback_arc_clone = on_service_discovered_callback.clone();
 
         // Spawn a new asynchronous task to listen for service discovery notifications.
@@ -84,7 +91,11 @@ impl VRChatOSC {
                     let callback_guard = callback_arc_clone.read().await;
                     // If a callback is registered, invoke it with the service name and address.
                     if let Some(callback) = callback_guard.as_ref() {
-                        callback(service_name.clone(), socket_addr);
+                        if service_name.trim_to(3).to_ascii() == "_osc._udp.local." {
+                            callback(ServiceType::Osc(service_name.clone(), socket_addr));
+                        } else if service_name.trim_to(3).to_ascii() == "_oscjson._tcp.local." {
+                            callback(ServiceType::OscQuery(service_name.clone(), socket_addr));
+                        }
                     }
                 }
             }
@@ -104,7 +115,7 @@ impl VRChatOSC {
     ///                as arguments. It must be `Send + Sync + 'static`.
     pub async fn on_connect<F>(&self, callback: F)
     where
-        F: Fn(Name, SocketAddr) + Send + Sync + 'static,
+        F: Fn(ServiceType) + Send + Sync + 'static,
     {
         let mut callback_guard = self.on_service_discovered_callback.write().await;
         *callback_guard = Some(Arc::new(callback));
