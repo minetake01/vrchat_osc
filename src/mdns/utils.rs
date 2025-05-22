@@ -1,4 +1,4 @@
-use std::{net::{IpAddr, SocketAddr}, sync::Arc};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 use hickory_proto::{
     multicast::{MDNS_IPV4, MDNS_IPV6},
@@ -8,10 +8,36 @@ use hickory_proto::{
         Name, RData, Record,
     },
 };
+use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
 
+const MDNS_PORT: u16 = 5353;
 /// TTL (Time to Live) for mDNS records in seconds.
 const RECORD_TTL: u32 = 120;
+
+pub async fn setup_multicast_socket(if_index: u32, addr: IpAddr) -> Result<UdpSocket, std::io::Error> {
+    match addr {
+        IpAddr::V4(addr) => {
+            let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+            socket.set_reuse_address(true)?;
+            socket.bind(&SocketAddrV4::new(addr, MDNS_PORT).into())?;
+            socket.set_nonblocking(true)?;
+            let socket = UdpSocket::from_std(socket.into())?;
+            socket.join_multicast_v4(Ipv4Addr::new(224, 0, 0, 251), Ipv4Addr::UNSPECIFIED)?;
+            Ok(socket)
+        }
+        IpAddr::V6(addr) => {
+            let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+            socket.set_reuse_address(true)?;
+            let scope_id = if addr.is_unicast_link_local() { if_index } else { 0 };
+            socket.bind(&SocketAddrV6::new(addr, MDNS_PORT, 0, scope_id).into())?;
+            socket.set_nonblocking(true)?;
+            let socket = UdpSocket::from_std(socket.into())?;
+            socket.join_multicast_v6(&Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xFB), 0)?;
+            Ok(socket)
+        }
+    }
+}
 
 /// Sends byte data to the appropriate mDNS multicast address (IPv4 or IPv6)
 /// based on the local address of the provided UDP socket.

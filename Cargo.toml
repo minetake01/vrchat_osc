@@ -32,6 +32,7 @@ http-body-util = "0.1"
 convert_case = "0.7"
 wildmatch = "2.4.0"
 socket2 = "0.5"
+network-interface = "2.0.1"
 
 [dev-dependencies]
 env_logger = "0.11"
