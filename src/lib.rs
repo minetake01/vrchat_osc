@@ -36,6 +36,8 @@ pub enum Error {
     HickoryError(#[from] hickory_proto::ProtoError),
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("Fetch error: {0}")]
+    FetchError(#[from] fetch::Error),
 }
 
 /// Holds handles related to a registered OSC service.
@@ -250,6 +252,18 @@ impl VRChatOSC {
         Ok(())
     }
 
+    /// Sends an OSC packet to a specific socket address.
+    ///
+    /// # Arguments
+    /// * `packet` - The `OscPacket` to send.
+    /// * `addr` - The `SocketAddr` to send the packet to.
+    pub async fn send_to_addr(&self, packet: OscPacket, addr: SocketAddr) -> Result<(), Error> {
+        let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)).await?;
+        let msg_buf = rosc::encoder::encode(&packet)?;
+        socket.send_to(&msg_buf, addr).await?;
+        Ok(())
+    }
+
     /// Retrieves a specific OSC parameter (node) from services matching a pattern.
     ///
     /// # Arguments
@@ -293,6 +307,19 @@ impl VRChatOSC {
             .await;
 
         Ok(params)
+    }
+
+    /// Retrieves a specific OSC parameter (node) from a specific OSCQuery service address.
+    ///
+    /// # Arguments
+    /// * `method` - The OSC path of the parameter to fetch (e.g., "/avatar/parameters/SomeParam").
+    /// * `addr` - The `SocketAddr` of the OSCQuery service.
+    ///
+    /// # Returns
+    /// The fetched `OscNode`.
+    pub async fn get_parameter_from_addr(&self, method: &str, addr: SocketAddr) -> Result<OscNode, Error> {
+        let (param, _url) = fetch::<_, OscNode>(addr, method).await?;
+        Ok(param)
     }
 
     /// Shuts down all registered services and cleans up resources.
