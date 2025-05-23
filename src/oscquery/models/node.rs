@@ -93,9 +93,10 @@ impl OscRootNode {
 
 
     /// Adds an `OscNode` to the tree.
-    /// If a node already exists at the specified path, its properties (excluding `full_path` and `contents`)
-    /// will be updated by the new node. Child nodes (`contents`) of an existing node are preserved
-    /// unless the new node also has contents for those specific children.
+    /// If a node already exists at the specified path, its properties (excluding `contents`)
+    /// will be updated by the new node. The `full_path` of the node at the target path will be
+    /// set or updated from `new_node_props.full_path`. Child nodes (`contents`) of an existing node are preserved
+    /// unless the new node also has contents for those specific children (contents are merged).
     /// This method takes `self` by value and returns a new `OscRootNode` to allow chaining.
     ///
     /// # Arguments
@@ -214,6 +215,23 @@ pub struct OscNode {
     pub range: Option<Vec<RangeInfo>>,
 }
 
+impl OscNode {
+    /// Checks if the node's OSC type tag matches a specific single type.
+    pub fn is_type(&self, expected_type: &OscType) -> bool {
+        self.r#type.as_ref().map_or(false, |tag| tag.is_single_type(expected_type))
+    }
+
+    /// Checks if the node's OSC type tag represents a boolean.
+    pub fn is_boolean_type(&self) -> bool {
+        self.r#type.as_ref().map_or(false, |tag| tag.is_boolean())
+    }
+
+    /// Gets the single `OscType` if the node has exactly one type specified.
+    pub fn get_single_osc_type(&self) -> Option<&OscType> {
+        self.r#type.as_ref().and_then(|tag| tag.get_single_type())
+    }
+}
+
 /// Represents an OSC type tag string, which is a sequence of OSC types.
 /// Example: "ifsb" means an int, a float, a string, and a blob.
 #[derive(Debug, Clone)]
@@ -263,6 +281,30 @@ impl OscTypeTag {
              return None;
         }
         Some(OscTypeTag(types))
+    }
+
+    /// Checks if the tag represents a single, specific OSC type.
+    pub fn is_single_type(&self, expected_type: &OscType) -> bool {
+        self.0.len() == 1 && &self.0[0] == expected_type
+    }
+
+    /// Checks if the tag represents a boolean type (single T or F).
+    pub fn is_boolean(&self) -> bool {
+        self.0.len() == 1 && self.0[0].is_boolean()
+    }
+
+    /// Gets the single `OscType` if this tag represents exactly one type.
+    pub fn get_single_type(&self) -> Option<&OscType> {
+        if self.0.len() == 1 {
+            Some(&self.0[0])
+        } else {
+            None
+        }
+    }
+
+    /// Checks if the tag contains a specific `OscType`.
+    pub fn contains(&self, osc_type: &OscType) -> bool {
+        self.0.contains(osc_type)
     }
 }
 
@@ -359,25 +401,65 @@ impl OscType {
         }
     }
 
+    /// Returns `true` if the OSC type represents a boolean value (True or False).
+    pub fn is_boolean(&self) -> bool {
+        matches!(self, OscType::True | OscType::False)
+    }
+
+    /// Returns `true` if the OSC type is a numeric type (Int32, Float32, Int64, Double).
+    pub fn is_numeric(&self) -> bool {
+        matches!(self, OscType::Int32 | OscType::Float32 | OscType::Int64 | OscType::Double)
+    }
+
     /// Creates an `OscType` from its single character tag string.
     /// Handles basic types and array types like "[iii]".
     pub fn from_tag(tag_char_or_array_str: &str) -> Option<OscType> {
         if tag_char_or_array_str.starts_with('[') && tag_char_or_array_str.ends_with(']') && tag_char_or_array_str.len() >= 2 {
-            let inner_tags = &tag_char_or_array_str[1..tag_char_or_array_str.len()-1];
+            let inner_tags_str = &tag_char_or_array_str[1..tag_char_or_array_str.len()-1];
             let mut types = Vec::new();
-            // This simple char iteration won't correctly parse nested arrays or multi-char type tags if they existed.
-            // Assuming basic types within an array for now.
-            let mut current_char_iter = inner_tags.chars().peekable();
-            while let Some(c) = current_char_iter.next() {
-                 // This recursive call is problematic if OscType::from_tag expects single char for basic types.
-                 // A more robust parser is needed for complex nested array tags.
-                 // For simple cases like "[ffi]", this might work if `from_tag` is called with single chars.
-                 // Let's refine this to iterate and parse individual types within the brackets.
-                 if let Some(t) = OscType::from_tag(&c.to_string()) { // Assuming basic types are single char
-                     types.push(t);
-                 } else {
-                     return None; // Invalid type char inside array
-                 }
+            let mut chars = inner_tags_str.chars().peekable();
+            let mut current_segment = String::new();
+
+            while let Some(c) = chars.next() {
+                current_segment.push(c);
+                if c == '[' {
+                    let mut bracket_level = 1;
+                    // Consume characters until the matching closing bracket for the current nested array
+                    while let Some(next_char_in_array) = chars.peek() {
+                        if *next_char_in_array == '[' {
+                            bracket_level += 1;
+                        } else if *next_char_in_array == ']' {
+                            bracket_level -= 1;
+                        }
+                        current_segment.push(chars.next().unwrap()); // Consume the char
+                        if bracket_level == 0 {
+                            break;
+                        }
+                    }
+                    if bracket_level != 0 { return None; } // Unmatched brackets
+
+                    // current_segment now holds a complete array tag like "[...]"
+                    if let Some(array_type_segment) = OscType::from_tag(&current_segment) {
+                        types.push(array_type_segment);
+                        current_segment.clear();
+                    } else {
+                        return None; // Invalid nested array tag
+                    }
+                } else {
+                    // Basic type (single char)
+                    // current_segment now holds a single character for a basic type
+                    if let Some(basic_type) = OscType::from_tag(&current_segment) {
+                        types.push(basic_type);
+                        current_segment.clear();
+                    } else {
+                        // If current_segment is not a valid single char tag, it's an error.
+                        // This happens if a multi-character segment is not an array.
+                        return None;
+                    }
+                }
+            }
+            if !current_segment.is_empty() { // Should be empty if all segments parsed correctly
+                return None;
             }
             return Some(OscType::Array(types));
         }
@@ -443,9 +525,18 @@ impl<'de> Deserialize<'de> for OscType {
     }
 }
 
+/// Represents an RGBA color value.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RgbaColorValue {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
 /// Represents an OSC value, corresponding to an `OscType`.
 /// This enum covers common types used in OSC messages and OSCQuery.
-#[derive(Debug, Clone, Serialize, Deserialize)] // Added Deserialize
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)] // Added Deserialize, PartialEq
 #[serde(untagged)] // Allows Serde to try deserializing into variants without a specific tag field.
                    // This is useful if JSON values can be numbers, strings, booleans, or arrays directly.
 pub enum OscValue {
@@ -453,10 +544,7 @@ pub enum OscValue {
     Float(f64), // Using f64 for floats to match JSON numbers, OSC 'f' is f32. Conversion might be needed.
     String(String),
     Bool(bool),
-    // Color is often represented as an RGBA string (e.g., "#RRGGBBAA") or an array of numbers in JSON.
-    // For simplicity, keeping as String, assuming hex format or similar.
-    // Could also be `Color { r: u8, g: u8, b: u8, a: u8 }` if specific structure is desired.
-    Color(String), 
+    Color(RgbaColorValue), // Changed from String to RgbaColorValue
     Array(Vec<OscValue>), // For OSC arrays.
     Nil, // Represents OSC Nil. Serializes to JSON null.
 }
