@@ -88,7 +88,7 @@ impl Mdns {
         let follow_services = Arc::new(RwLock::new(HashSet::new()));
         let mut tasks = Vec::new();
 
-        // Attempt to set up a socket for IPv6 on all interfaces
+        // Attempt to bind a UDP socket for multicast
 		let interfaces = NetworkInterface::show()?;
 		for interface in interfaces {
             for addr in interface.addr {
@@ -96,7 +96,7 @@ impl Mdns {
                 
                 match setup_multicast_socket(interface.index, addr.ip()).await {
                     Ok(socket) => {
-                        log::info!("Successfully bound to IPv6 multicast socket: {:?}", socket.local_addr());
+                        log::info!("Successfully bound to multicast socket: {:?}", socket.local_addr());
                         let socket = Arc::new(socket);
                         tasks.push(MdnsTask {
                             socket: socket.clone(),
@@ -110,7 +110,7 @@ impl Mdns {
                         });
                     }
                     Err(e) => {
-                        log::error!("Failed to bind to IPv6 multicast socket: {}", e);
+                        log::error!("Failed to bind to multicast socket: {}", e);
                     }
                 }
             }
