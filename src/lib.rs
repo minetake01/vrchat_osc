@@ -57,6 +57,8 @@ pub enum ServiceType {
 
 /// Main struct for managing VRChat OSC services, discovery, and communication.
 pub struct VRChatOSC {
+    /// Socket for sending OSC messages.
+    send_socket: UdpSocket,
     /// mDNS client instance for service discovery.
     mdns: mdns::Mdns,
     /// Stores registered service handles, mapping service name to its handle.
@@ -70,6 +72,8 @@ impl VRChatOSC {
     /// Creates a new `VRChatOSC` instance.
     /// Initializes mDNS, sets up service discovery, and starts a listener task for mDNS service notifications.
     pub async fn new() -> Result<Arc<VRChatOSC>, Error> {
+        let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)).await?;
+
         // Create an mpsc channel for notifying about discovered mDNS services.
         let (discover_notifier_tx, mut discover_notifier_rx) = mpsc::channel(8);
         
@@ -104,6 +108,7 @@ impl VRChatOSC {
         });
 
         Ok(Arc::new(VRChatOSC {
+            send_socket: socket,
             mdns: mdns_client,
             service_handles: Arc::new(RwLock::new(HashMap::new())),
             on_service_discovered_callback,
@@ -238,15 +243,12 @@ impl VRChatOSC {
             log::warn!("No mDNS services found matching the expression: {}", to);
             return Ok(());
         }
-        
-        // Bind a UDP socket to send from. Using an unspecified port (0).
-        let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)).await?;
 
         // Encode the OSC packet into bytes.
         let msg_buf = rosc::encoder::encode(&packet)?;
         // Send the packet to all found services.
         for (_, addr) in services {
-            socket.send_to(&msg_buf, addr).await?;
+            self.send_socket.send_to(&msg_buf, addr).await?;
         }
 
         Ok(())
@@ -258,9 +260,8 @@ impl VRChatOSC {
     /// * `packet` - The `OscPacket` to send.
     /// * `addr` - The `SocketAddr` to send the packet to.
     pub async fn send_to_addr(&self, packet: OscPacket, addr: SocketAddr) -> Result<(), Error> {
-        let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)).await?;
         let msg_buf = rosc::encoder::encode(&packet)?;
-        socket.send_to(&msg_buf, addr).await?;
+        self.send_socket.send_to(&msg_buf, addr).await?;
         Ok(())
     }
 
