@@ -68,4 +68,4 @@ By contributing, you agree that your code will be licensed under the MIT license
 
 ## Acknowledgements
 
-The data models defined in `vrchat_osc::models::*` are implemented with reference to [tychedelia/osc-query](https://www.google.com/search?q=https://github.com/tychedelia/osc-query).
+The data models defined in `vrchat_osc::models::*` are implemented with reference to [tychedelia/osc-query](https://github.com/tychedelia/osc-query).
