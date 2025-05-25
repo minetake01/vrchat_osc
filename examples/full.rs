@@ -16,6 +16,7 @@ async fn main() -> Result<(), Error> {
         ServiceType::Osc(name, addr) => {
             log::info!("Connected to OSC server: {} at {}", name, addr);
             let vrchat_osc = cloned_vrchat_osc.clone();
+            // Send a message to the OSC server
             tokio::spawn(async move {
                 vrchat_osc.send_to_addr(
                     OscPacket::Message(OscMessage {
@@ -30,7 +31,10 @@ async fn main() -> Result<(), Error> {
         ServiceType::OscQuery(name, addr) => {
             log::info!("Connected to OSCQuery server: {} at {}", name, addr);
             let vrchat_osc = cloned_vrchat_osc.clone();
+            // Get parameters from the OSCQuery server
             tokio::spawn(async move {
+                // NOTE: When actually retrieving parameters, you should implement retry logic here.
+                // If VRChat has just started, it is possible that valid values may not be returned immediately.
                 let params = vrchat_osc.get_parameter_from_addr("/avatar/parameters", addr).await.unwrap();
                 log::info!("Received parameters: {:?}", params);
             });
@@ -46,10 +50,31 @@ async fn main() -> Result<(), Error> {
     }).await?;
     log::info!("Service registered.");
 
+    // Wait for the service to be registered
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    // Send a test message to the registered service
+    vrchat_osc.send(
+        OscPacket::Message(OscMessage {
+            addr: "/chatbox/input".to_string(),
+            args: vec![
+                rosc::OscType::String("Hello, VRChat!".to_string()),
+                rosc::OscType::Bool(true),
+            ],
+        }),
+        "VRChat-Client-*"
+    ).await?;
+    log::info!("Test message sent to VRChat-Client-*.");
+
+    // Get parameters from the registered service
+    let params = vrchat_osc.get_parameter("/avatar/parameters", "VRChat-Client-*").await?;
+    log::info!("Received parameters: {:?}", params);
+
     // Keep the program running to handle incoming messages
     log::info!("Press Ctrl+C to exit.");
     tokio::signal::ctrl_c().await?;
 
+    // Shutdown the VRChatOSC instance
     vrchat_osc.shutdown().await?;
     Ok(())
 }
