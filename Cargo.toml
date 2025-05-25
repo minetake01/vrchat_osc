@@ -1,6 +1,6 @@
 [package]
 name = "vrchat_osc"
-description = "vrchat-osc is a Rust crate designed to easily utilize VRChat's OSC (Open Sound Control) and OSCQuery protocols."
+description = "vrchat_osc is a Rust crate designed to easily utilize VRChat's OSC (Open Sound Control) and OSCQuery protocols."
 homepage = "https://github.com/minetake01/vrchat_osc"
 readme = "README.md"
 keywords = [

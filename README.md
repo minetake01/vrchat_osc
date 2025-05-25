@@ -1,9 +1,9 @@
 # VRChat OSC/OSCQuery for Rust
 
-[![Crates.io](https://img.shields.io/crates/v/vrchat-osc)](https://crates.io/crates/vrchat-osc)
-[![Documentation](https://docs.rs/vrchat-osc/badge.svg)](https://docs.rs/vrchat-osc)
+[![Crates.io](https://img.shields.io/crates/v/vrchat_osc)](https://crates.io/crates/vrchat_osc)
+[![Documentation](https://docs.rs/vrchat_osc/badge.svg)](https://docs.rs/vrchat_osc)
 
-**`vrchat-osc` is a Rust crate designed to easily utilize VRChat's OSC (Open Sound Control) and OSCQuery protocols.**
+**`vrchat_osc` is a Rust crate designed to easily utilize VRChat's OSC (Open Sound Control) and OSCQuery protocols.**
 
 This crate aims to help VRChat tool developers efficiently perform operations such as manipulating avatar parameters, retrieving information, and providing custom OSC services. It integrates OSC message sending/receiving with service discovery via mDNS for OSCQuery.
 
@@ -22,7 +22,7 @@ To use this crate, add the following dependencies to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vrchat-osc = "1.1"
+vrchat_osc = "1.1"
 tokio = { version = "1", features = ["full"] }
 rosc = "0.10" # For constructing OSC messages
 ````
