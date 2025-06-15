@@ -546,6 +546,7 @@ pub enum OscValue {
     Bool(bool),
     Color(RgbaColorValue), // Changed from String to RgbaColorValue
     Array(Vec<OscValue>), // For OSC arrays.
+    Empty{}, // For VRChat (potential) bug
     Nil, // Represents OSC Nil. Serializes to JSON null.
 }
 
