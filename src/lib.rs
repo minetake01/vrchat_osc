@@ -248,8 +248,12 @@ impl VRChatOSC {
         // Encode the OSC packet into bytes.
         let msg_buf = rosc::encoder::encode(&packet)?;
         // Send the packet to all found services.
-        for (_, addr) in services {
-            self.send_socket.send_to(&msg_buf, addr).await?;
+        let send_futs = services
+            .into_iter()
+            .map(|(_, addr)| self.send_socket.send_to(&msg_buf, addr));
+        let results = futures::future::join_all(send_futs).await;
+        for res in results {
+            res?;
         }
 
         Ok(())
