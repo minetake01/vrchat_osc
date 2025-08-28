@@ -348,6 +348,11 @@ impl VRChatOSC {
         }
         Ok(())
     }
+
+    pub async fn list_services(&self) -> Vec<String> {
+        let handles = self.service_handles.read().await;
+        handles.keys().cloned().collect()
+    }
 }
 
 impl Drop for VRChatOSC {
