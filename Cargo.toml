@@ -25,7 +25,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 axum = "0.8"
 hickory-proto = { version = "0.25", features = ["mdns"] }
-rosc = "~0.10"
+rosc = "0.11"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
