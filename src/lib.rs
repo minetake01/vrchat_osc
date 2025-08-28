@@ -3,6 +3,7 @@ mod mdns;
 mod fetch;
 
 pub use oscquery::*;
+pub use rosc;
 
 use crate::fetch::fetch;
 
