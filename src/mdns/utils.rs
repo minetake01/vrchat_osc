@@ -27,7 +27,7 @@ pub async fn setup_multicast_socket(if_index: u32, addr: IpAddr) -> Result<UdpSo
             socket.bind(&SocketAddrV4::new(addr, MDNS_PORT).into())?;
             socket.set_nonblocking(true)?;
             let socket = UdpSocket::from_std(socket.into())?;
-            socket.join_multicast_v4(Ipv4Addr::new(224, 0, 0, 251), Ipv4Addr::UNSPECIFIED)?;
+            socket.join_multicast_v4(Ipv4Addr::new(224, 0, 0, 251), addr)?;
             Ok(socket)
         }
         IpAddr::V6(addr) => {
@@ -40,7 +40,7 @@ pub async fn setup_multicast_socket(if_index: u32, addr: IpAddr) -> Result<UdpSo
             socket.bind(&SocketAddrV6::new(addr, MDNS_PORT, 0, scope_id).into())?;
             socket.set_nonblocking(true)?;
             let socket = UdpSocket::from_std(socket.into())?;
-            socket.join_multicast_v6(&Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xFB), 0)?;
+            socket.join_multicast_v6(&Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xFB), if_index)?;
             Ok(socket)
         }
     }
