@@ -20,6 +20,9 @@ pub async fn setup_multicast_socket(if_index: u32, addr: IpAddr) -> Result<UdpSo
         IpAddr::V4(addr) => {
             let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
             socket.set_reuse_address(true)?;
+            // If on Unix-like systems, enable port reuse for multiple sockets on the same port
+            #[cfg(unix)]
+            socket.set_reuse_port(true)?;
             socket.multicast_loop_v4()?;
             socket.bind(&SocketAddrV4::new(addr, MDNS_PORT).into())?;
             socket.set_nonblocking(true)?;
@@ -30,6 +33,8 @@ pub async fn setup_multicast_socket(if_index: u32, addr: IpAddr) -> Result<UdpSo
         IpAddr::V6(addr) => {
             let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
             socket.set_reuse_address(true)?;
+            #[cfg(unix)]
+            socket.set_reuse_port(true)?;
             socket.multicast_loop_v6()?;
             let scope_id = if addr.is_unicast_link_local() { if_index } else { 0 };
             socket.bind(&SocketAddrV6::new(addr, MDNS_PORT, 0, scope_id).into())?;
