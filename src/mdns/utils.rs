@@ -11,7 +11,10 @@ use hickory_proto::{
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
 
+#[cfg(not(unix))]
 const MDNS_PORT: u16 = 5353;
+#[cfg(unix)]
+const MDNS_PORT: u16 = 0;
 /// TTL (Time to Live) for mDNS records in seconds.
 const RECORD_TTL: u32 = 120;
 
