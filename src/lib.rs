@@ -353,6 +353,7 @@ impl VRChatOSC {
         Ok(())
     }
 
+    /// Lists the names of all currently registered services.
     pub async fn list_services(&self) -> Vec<String> {
         let handles = self.service_handles.read().await;
         handles.keys().cloned().collect()
