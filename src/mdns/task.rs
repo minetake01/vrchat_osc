@@ -14,7 +14,7 @@ use tokio::{
     sync::{mpsc, RwLock},
 };
 
-use super::utils::{convert_to_message, extract_service_info, send_to_mdns};
+use super::utils::{create_mdns_response_message, extract_service_info, send_to_mdns};
 
 /// Size of the buffer used for receiving UDP packets. 4KB is a common size.
 const BUFFER_SIZE: usize = 4096;
@@ -153,7 +153,7 @@ async fn handle_query(
                         instance_name,
                         addr
                     );
-                    let response = convert_to_message(instance_name, addr);
+                    let response = create_mdns_response_message(instance_name, addr);
                     match response.to_bytes() {
                         Ok(bytes) => {
                             if let Err(e) = send_to_mdns(&socket, &bytes).await {
@@ -184,7 +184,7 @@ async fn handle_query(
                         query_name_str,
                         addr
                     );
-                    let response = convert_to_message(query.name(), addr); // Use query.name() as it's the instance name
+                    let response = create_mdns_response_message(query.name(), addr); // Use query.name() as it's the instance name
                     match response.to_bytes() {
                         Ok(bytes) => {
                             if let Err(e) = send_to_mdns(&socket, &bytes).await {

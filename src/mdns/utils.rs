@@ -85,7 +85,7 @@ pub async fn send_to_mdns(
 ///
 /// # Returns
 /// An mDNS `Message` configured as a response, ready to be serialized and sent.
-pub fn convert_to_message(instance_name: &Name, addr: SocketAddr) -> Message {
+pub fn create_mdns_response_message(instance_name: &Name, addr: SocketAddr) -> Message {
     let mut message = Message::new();
     message
         .set_id(0)
