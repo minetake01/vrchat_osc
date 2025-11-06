@@ -14,7 +14,7 @@ use tokio::{
     sync::{mpsc, RwLock},
 };
 
-use super::utils::{convert_to_message, extract_service_info, send_to_mdns};
+use super::utils::{create_mdns_response_message, extract_service_info};
 
 /// Size of the buffer used for receiving UDP packets. 4KB is a common size.
 const BUFFER_SIZE: usize = 4096;
@@ -46,9 +46,9 @@ pub async fn server_task(
     let mut buf = [0u8; BUFFER_SIZE]; // Initialize buffer
 
     loop {
-        // Attempt to receive data from the UDP socket.
-        let len = match socket.recv(&mut buf).await {
-            Ok(len) => len,
+        // Attempt to receive data from the UDP socket with sender address.
+        let (len, sender_addr) = match socket.recv_from(&mut buf).await {
+            Ok((len, addr)) => (len, addr),
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::ConnectionReset || e.kind() == std::io::ErrorKind::BrokenPipe {
                     log::warn!("Socket connection error ({}). Task for {:?} might need to be restarted or interface is down.", e, socket.local_addr().ok());
@@ -70,7 +70,7 @@ pub async fn server_task(
         let message = match Message::from_bytes(&buf[..len]) {
             Ok(msg) => msg,
             Err(e) => {
-                log::warn!("Failed to parse mDNS message from bytes ({} bytes received): {}. Source unknown without recv_from.", len, e);
+                log::warn!("Failed to parse mDNS message from bytes ({} bytes received) from {}: {}", len, sender_addr, e);
                 continue;
             }
         };
@@ -92,6 +92,7 @@ pub async fn server_task(
                     message,
                     socket.clone(),
                     &registered_services,
+                    sender_addr,
                 )
                 .await;
             }
@@ -120,10 +121,12 @@ pub async fn server_task(
 /// * `query_message` - The parsed `Message` object representing the mDNS query.
 /// * `socket` - The `Arc<UdpSocket>` to send responses from.
 /// * `registered_services` - Read-only access to the map of locally registered services.
+/// * `sender_addr` - The address of the client that sent the query.
 async fn handle_query(
     query_message: Message,
     socket: Arc<UdpSocket>,
     registered_services: &Arc<RwLock<HashMap<Name, HashMap<Name, SocketAddr>>>>,
+    sender_addr: SocketAddr,
 ) {
     // Iterate over each query in the mDNS message.
     for query in query_message.queries() {
@@ -153,10 +156,10 @@ async fn handle_query(
                         instance_name,
                         addr
                     );
-                    let response = convert_to_message(instance_name, addr);
+                    let response = create_mdns_response_message(instance_name, addr);
                     match response.to_bytes() {
                         Ok(bytes) => {
-                            if let Err(e) = send_to_mdns(&socket, &bytes).await {
+                            if let Err(e) = socket.send_to(&bytes, sender_addr).await {
                                 log::error!("Failed to send response for instance {}: {}", instance_name, e);
                             }
                         }
@@ -184,10 +187,10 @@ async fn handle_query(
                         query_name_str,
                         addr
                     );
-                    let response = convert_to_message(query.name(), addr); // Use query.name() as it's the instance name
+                    let response = create_mdns_response_message(query.name(), addr); // Use query.name() as it's the instance name
                     match response.to_bytes() {
                         Ok(bytes) => {
-                            if let Err(e) = send_to_mdns(&socket, &bytes).await {
+                            if let Err(e) = socket.send_to(&bytes, sender_addr).await {
                                 log::error!("Failed to send response for instance {}: {}", query.name(), e);
                             }
                         }
