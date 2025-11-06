@@ -34,7 +34,7 @@ async fn main() -> Result<(), Error> {
             let vrchat_osc = cloned_vrchat_osc.clone();
             // Get parameters from the OSCQuery server
             tokio::spawn(async move {
-                const RETRY_COUNT: u8 = 10;
+                const RETRY_COUNT: u8 = 30;
                 let mut counter = 0;
                 // Valid values may not be returned immediately after VRChat starts, as avatars might still be loading.
                 let params = loop {
@@ -49,7 +49,7 @@ async fn main() -> Result<(), Error> {
                     {
                         Ok(v) => { break v },
                         Err(_) => {
-                            tokio::time::sleep(Duration::from_millis(500)).await;
+                            tokio::time::sleep(Duration::from_secs(1)).await;
                         },
                     }
                 };
