@@ -1,28 +1,28 @@
-mod oscquery;
-mod mdns;
 mod fetch;
+mod mdns;
+mod oscquery;
 
 pub use oscquery::*;
 pub use rosc;
 
 use crate::fetch::fetch;
 
-use std::{
-    collections::HashMap,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
-};
-use wildmatch::WildMatch;
 use convert_case::{Case, Casing};
 use futures::{stream, StreamExt};
 use hickory_proto::rr::Name;
 use oscquery::models::{HostInfo, OscNode, OscRootNode};
 use rosc::OscPacket;
+use std::{
+    collections::HashMap,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    sync::Arc,
+};
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, RwLock},
     task::JoinHandle,
 };
+use wildmatch::WildMatch;
 
 /// Defines the possible errors that can occur within the VRChatOSC library.
 #[derive(thiserror::Error, Debug)]
@@ -66,7 +66,8 @@ pub struct VRChatOSC {
     service_handles: Arc<RwLock<HashMap<String, ServiceHandle>>>,
     /// Callback function to be executed when a new mDNS service is discovered.
     /// The Name is the service instance name, and SocketAddr is its resolved address.
-    on_service_discovered_callback: Arc<RwLock<Option<Arc<dyn Fn(ServiceType) + Send + Sync + 'static>>>>,
+    on_service_discovered_callback:
+        Arc<RwLock<Option<Arc<dyn Fn(ServiceType) + Send + Sync + 'static>>>>,
 }
 
 impl VRChatOSC {
@@ -77,16 +78,22 @@ impl VRChatOSC {
 
         // Create an mpsc channel for notifying about discovered mDNS services.
         let (discover_notifier_tx, mut discover_notifier_rx) = mpsc::channel(8);
-        
+
         // Initialize the mDNS client, passing the sender part of the notification channel.
         let mdns_client = mdns::Mdns::new(discover_notifier_tx).await?;
-        
+
         // Start following OSC services and OSCQuery JSON services on the local network.
-        let _ = mdns_client.follow(Name::from_ascii("_osc._udp.local.")?).await;
-        let _ = mdns_client.follow(Name::from_ascii("_oscjson._tcp.local.")?).await;
-        
+        let _ = mdns_client
+            .follow(Name::from_ascii("_osc._udp.local.")?)
+            .await;
+        let _ = mdns_client
+            .follow(Name::from_ascii("_oscjson._tcp.local.")?)
+            .await;
+
         // Prepare a shared storage for the service discovered callback.
-        let on_service_discovered_callback = Arc::new(RwLock::new(None::<Arc<dyn Fn(ServiceType) + Send + Sync + 'static>>));
+        let on_service_discovered_callback = Arc::new(RwLock::new(
+            None::<Arc<dyn Fn(ServiceType) + Send + Sync + 'static>>,
+        ));
         let callback_arc_clone = on_service_discovered_callback.clone();
 
         // Spawn a new asynchronous task to listen for service discovery notifications.
@@ -128,7 +135,7 @@ impl VRChatOSC {
         let mut callback_guard = self.on_service_discovered_callback.write().await;
         *callback_guard = Some(Arc::new(callback));
     }
-    
+
     /// Registers a new OSC service with the local mDNS daemon and starts listening for OSC messages.
     ///
     /// # Arguments
@@ -136,7 +143,12 @@ impl VRChatOSC {
     /// * `parameters` - The root node of the OSC address space for this service.
     /// * `handler` - A function that will be called when an OSC packet is received for this service.
     ///               It must be `Fn(OscPacket) + Send + 'static`.
-    pub async fn register<F>(&self, service_name: &str, parameters: OscRootNode, handler: F) -> Result<(), Error>
+    pub async fn register<F>(
+        &self,
+        service_name: &str,
+        parameters: OscRootNode,
+        handler: F,
+    ) -> Result<(), Error>
     where
         F: Fn(OscPacket) + Send + 'static,
     {
@@ -144,7 +156,7 @@ impl VRChatOSC {
         // Bind to localhost on an OS-assigned port.
         let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).await?;
         let osc_local_addr = socket.local_addr()?; // Get the actual address it bound to.
-        
+
         // Spawn a task to handle incoming OSC packets.
         let osc_handle = tokio::spawn(async move {
             let mut buf = [0; rosc::decoder::MTU]; // Buffer for receiving OSC packets.
@@ -160,11 +172,17 @@ impl VRChatOSC {
                         }
                     }
                     Err(e) => {
-                        if e.kind() == std::io::ErrorKind::ConnectionReset || e.kind() == std::io::ErrorKind::BrokenPipe {
+                        if e.kind() == std::io::ErrorKind::ConnectionReset
+                            || e.kind() == std::io::ErrorKind::BrokenPipe
+                        {
                             log::warn!("Socket connection error ({}). Task for {:?} might need to be restarted or interface is down.", e, socket.local_addr().ok());
                             break;
                         } else {
-                            log::error!("Failed to receive data on mDNS socket {:?}: {}", socket.local_addr().ok(), e);
+                            log::error!(
+                                "Failed to receive data on mDNS socket {:?}: {}",
+                                socket.local_addr().ok(),
+                                e
+                            );
                         }
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                         continue;
@@ -172,36 +190,45 @@ impl VRChatOSC {
                 }
             }
         });
-        
+
         // Start OSCQuery server (HTTP server)
         let host_info = HostInfo::new(
             service_name.to_string(),
-            osc_local_addr.ip(), // Use the IP of the OSC server.
+            osc_local_addr.ip(),   // Use the IP of the OSC server.
             osc_local_addr.port(), // Use the port of the OSC server.
         );
         let mut osc_query = OscQuery::new(host_info, parameters);
         // Serve OSCQuery on localhost with an OS-assigned port.
-        let osc_query_local_addr = osc_query.serve(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).await?;
+        let osc_query_local_addr = osc_query
+            .serve(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .await?;
 
         // Create mDNS service announcements.
         let service_name_upper_camel = service_name.to_case(Case::UpperCamel); // Convert service name case.
-        
+
         // Register the OSC and OSCQuery services with mDNS.
-        self.mdns.register(
-            Name::from_ascii(format!("{}._osc._udp.local.", service_name_upper_camel))?,
-            osc_local_addr,
-        ).await?;
-        self.mdns.register(
-            Name::from_ascii(format!("{}._oscjson._tcp.local.", service_name_upper_camel))?,
-            osc_query_local_addr,
-        ).await?;
+        self.mdns
+            .register(
+                Name::from_ascii(format!("{}._osc._udp.local.", service_name_upper_camel))?,
+                osc_local_addr,
+            )
+            .await?;
+        self.mdns
+            .register(
+                Name::from_ascii(format!("{}._oscjson._tcp.local.", service_name_upper_camel))?,
+                osc_query_local_addr,
+            )
+            .await?;
 
         // Save service handles for later management (e.g., unregistering).
         let mut handles = self.service_handles.write().await;
-        handles.insert(service_name.to_string(), ServiceHandle {
-            osc: osc_handle,
-            osc_query,
-        });
+        handles.insert(
+            service_name.to_string(),
+            ServiceHandle {
+                osc: osc_handle,
+                osc_query,
+            },
+        );
         Ok(())
     }
 
@@ -216,9 +243,19 @@ impl VRChatOSC {
         let mut service_handles_map = self.service_handles.write().await;
         if let Some(mut service_handle_entry) = service_handles_map.remove(service_name) {
             // Unregister from mDNS.
-            self.mdns.unregister(Name::from_ascii(format!("{}._osc._udp.local.", service_name_upper_camel))?).await?;
-            self.mdns.unregister(Name::from_ascii(format!("{}._oscjson._tcp.local.", service_name_upper_camel))?).await?;
-            
+            self.mdns
+                .unregister(Name::from_ascii(format!(
+                    "{}._osc._udp.local.",
+                    service_name_upper_camel
+                ))?)
+                .await?;
+            self.mdns
+                .unregister(Name::from_ascii(format!(
+                    "{}._oscjson._tcp.local.",
+                    service_name_upper_camel
+                ))?)
+                .await?;
+
             // Stop the associated tasks/servers.
             service_handle_entry.osc.abort(); // Abort the OSC listening task.
             service_handle_entry.osc_query.shutdown(); // Gracefully shutdown the OSCQuery server.
@@ -235,10 +272,13 @@ impl VRChatOSC {
     pub async fn send(&self, packet: OscPacket, to: &str) -> Result<(), Error> {
         // Find services matching the pattern. The matching logic is within `find_service`.
         // The closure provided to `find_service` determines if a service (by its Name) matches.
-        let services = self.mdns.find_service(|name, _| {
-            // `WildMatch` performs glob-style pattern matching.
-            WildMatch::new(&format!("{}._osc._udp.local.", to)).matches(&name.to_ascii())
-        }).await;
+        let services = self
+            .mdns
+            .find_service(|name, _| {
+                // `WildMatch` performs glob-style pattern matching.
+                WildMatch::new(&format!("{}._osc._udp.local.", to)).matches(&name.to_ascii())
+            })
+            .await;
 
         if services.is_empty() {
             log::warn!("No mDNS services found matching the expression: {}", to);
@@ -280,15 +320,25 @@ impl VRChatOSC {
     /// # Returns
     /// A `Vec` of tuples, where each tuple contains the service `Name` and the fetched `OscNode`.
     /// Returns an empty Vec if no services match or if fetching fails for all matched services.
-    pub async fn get_parameter(&self, method: &str, from: &str) -> Result<Vec<(Name, OscNode)>, Error> {
+    pub async fn get_parameter(
+        &self,
+        method: &str,
+        from: &str,
+    ) -> Result<Vec<(Name, OscNode)>, Error> {
         // Find services matching the pattern. The matching logic is within `find_service`.
         // The closure provided to `find_service` determines if a service (by its Name) matches.
-        let services = self.mdns.find_service(|name, _| {
-            WildMatch::new(&format!("{}._oscjson._tcp.local.", from)).matches(&name.to_ascii())
-        }).await;
+        let services = self
+            .mdns
+            .find_service(|name, _| {
+                WildMatch::new(&format!("{}._oscjson._tcp.local.", from)).matches(&name.to_ascii())
+            })
+            .await;
 
         if services.is_empty() {
-            log::warn!("No mDNS services found for get_parameter matching expression: {}", from);
+            log::warn!(
+                "No mDNS services found for get_parameter matching expression: {}",
+                from
+            );
             return Ok(Vec::new());
         }
 
@@ -300,7 +350,9 @@ impl VRChatOSC {
         // `collect` gathers all successful results into a Vec.
         let params = stream::iter(services)
             .map(|(name, addr)| async move {
-                fetch::<_, OscNode>(addr, method).await.map(|(param, _)| (name.clone(), param))
+                fetch::<_, OscNode>(addr, method)
+                    .await
+                    .map(|(param, _)| (name.clone(), param))
             })
             .buffer_unordered(3)
             .filter_map(|res| async {
@@ -323,7 +375,11 @@ impl VRChatOSC {
     ///
     /// # Returns
     /// The fetched `OscNode`.
-    pub async fn get_parameter_from_addr(&self, method: &str, addr: SocketAddr) -> Result<OscNode, Error> {
+    pub async fn get_parameter_from_addr(
+        &self,
+        method: &str,
+        addr: SocketAddr,
+    ) -> Result<OscNode, Error> {
         let (param, _url) = fetch::<_, OscNode>(addr, method).await?;
         Ok(param)
     }
@@ -334,18 +390,32 @@ impl VRChatOSC {
     pub async fn shutdown(&self) -> Result<(), Error> {
         let mut service_handles_map = self.service_handles.write().await;
         let service_names: Vec<String> = service_handles_map.keys().cloned().collect();
-        
+
         for name in service_names {
             if let Some(mut handle) = service_handles_map.remove(&name) {
                 let service_name_upper_camel = name.to_case(Case::UpperCamel);
                 // Attempt to unregister from mDNS. Errors are logged but not propagated to allow other services to shut down.
-                if let Err(e) = self.mdns.unregister(Name::from_ascii(format!("{}._osc._udp.local.", service_name_upper_camel))?).await {
+                if let Err(e) = self
+                    .mdns
+                    .unregister(Name::from_ascii(format!(
+                        "{}._osc._udp.local.",
+                        service_name_upper_camel
+                    ))?)
+                    .await
+                {
                     log::error!("Failed to unregister OSC for {}: {}", name, e);
                 }
-                if let Err(e) = self.mdns.unregister(Name::from_ascii(format!("{}._oscjson._tcp.local.", service_name_upper_camel))?).await {
+                if let Err(e) = self
+                    .mdns
+                    .unregister(Name::from_ascii(format!(
+                        "{}._oscjson._tcp.local.",
+                        service_name_upper_camel
+                    ))?)
+                    .await
+                {
                     log::error!("Failed to unregister OSCQuery for {}: {}", name, e);
                 }
-                
+
                 handle.osc.abort();
                 handle.osc_query.shutdown();
             }
@@ -381,8 +451,9 @@ impl Drop for VRChatOSC {
             // In a real application, this should be logged or handled appropriately.
             // Using log::error! or eprintln! here might be appropriate.
             // For now, we acknowledge that proper async shutdown is preferred.
-            if !std::thread::panicking() { // Avoid double panic if already panicking
-                 log::warn!("VRChatOSC: Could not acquire lock on service_handles during drop. Explicitly call shutdown() for robust cleanup.");
+            if !std::thread::panicking() {
+                // Avoid double panic if already panicking
+                log::warn!("VRChatOSC: Could not acquire lock on service_handles during drop. Explicitly call shutdown() for robust cleanup.");
             }
         }
     }

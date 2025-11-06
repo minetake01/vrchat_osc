@@ -40,12 +40,12 @@ where
     let stream = TcpStream::connect(addrs).await?;
     // Get the peer's socket address after successful connection.
     let connected_addr = stream.peer_addr()?;
-    
+
     // Perform an HTTP/1 handshake over the TCP stream.
     // `TokioIo` adapts the Tokio `TcpStream` for Hyper.
     // `sender` is used to send requests, `conn` represents the connection itself.
     let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(stream)).await?;
-    
+
     // Spawn a background task to drive the connection.
     // This task polls the connection for events (like incoming data or connection close)
     // and ensures the HTTP protocol is correctly handled.
@@ -69,14 +69,14 @@ where
 
     // Send the request using the sender obtained from the handshake.
     let res = sender.send_request(req).await?;
-    
+
     // Collect the entire response body.
     // `res.collect()` consumes the body and returns a future that resolves to the aggregated body.
     let body_bytes = res.collect().await?.aggregate(); // Aggregate chunks into a single buffer.
-    
+
     // Deserialize the response body from JSON.
     // `body.reader()` provides a `BufRead` interface over the buffered body data.
     let data: F = serde_json::from_reader(body_bytes.reader())?;
-    
+
     Ok((data, connected_addr))
 }

@@ -37,11 +37,13 @@ impl OscRootNode {
     pub fn with_tracking(self) -> Self {
         self.add_node(OscNode {
             full_path: "/tracking".to_string(),
-            description: Some("Root for tracking-related OSC messages (e.g., head, hands).".to_string()),
+            description: Some(
+                "Root for tracking-related OSC messages (e.g., head, hands).".to_string(),
+            ),
             ..Default::default()
         })
     }
-    
+
     /// Utility method to quickly add a "/dolly" node.
     pub fn with_dolly(self) -> Self {
         self.add_node(OscNode {
@@ -81,7 +83,7 @@ impl OscRootNode {
         }
         Some(current)
     }
-    
+
     /// Retrieves a mutable reference to an `OscNode` at the specified path.
     ///
     /// # Arguments
@@ -100,7 +102,6 @@ impl OscRootNode {
         Some(current)
     }
 
-
     /// Adds an `OscNode` to the tree.
     /// If a node already exists at the specified path, its properties (excluding `contents`)
     /// will be updated by the new node. The `full_path` of the node at the target path will be
@@ -111,34 +112,48 @@ impl OscRootNode {
     /// # Arguments
     /// * `node` - The `OscNode` to add. Its `full_path` determines its position in the tree.
     pub fn add_node(mut self, new_node_props: OscNode) -> Self {
-        let path_parts: Vec<&str> = new_node_props.full_path.split('/').filter(|p| !p.is_empty()).collect();
+        let path_parts: Vec<&str> = new_node_props
+            .full_path
+            .split('/')
+            .filter(|p| !p.is_empty())
+            .collect();
         let mut current = &mut self.root;
         let mut constructed_path = String::from("/");
 
         for (i, part) in path_parts.iter().enumerate() {
             // Construct the path for the current segment.
-            if i > 0 || (i == 0 && !part.is_empty()) { // Avoid double slashes if part is empty, ensure leading slash
-                 if constructed_path.len() > 1 { constructed_path.push('/'); }
-                 constructed_path.push_str(part);
-            } else if i == 0 && part.is_empty() && constructed_path.is_empty() { // handles cases like adding "/"
+            if i > 0 || (i == 0 && !part.is_empty()) {
+                // Avoid double slashes if part is empty, ensure leading slash
+                if constructed_path.len() > 1 {
+                    constructed_path.push('/');
+                }
+                constructed_path.push_str(part);
+            } else if i == 0 && part.is_empty() && constructed_path.is_empty() {
+                // handles cases like adding "/"
                 constructed_path = "/".to_string();
             }
 
-
             // Get or insert the node for the current part.
             // `or_insert_with` creates a new default node if `part` doesn't exist in `contents`.
-            current = current.contents.entry(part.to_string()).or_insert_with(|| OscNode {
-                full_path: constructed_path.clone(),
-                ..Default::default()
-            });
+            current = current
+                .contents
+                .entry(part.to_string())
+                .or_insert_with(|| OscNode {
+                    full_path: constructed_path.clone(),
+                    ..Default::default()
+                });
         }
-        
+
         // Now `current` points to the node at `new_node_props.full_path`.
         // Update its properties with values from `new_node_props`.
         // Preserve existing children in `current.contents` unless `new_node_props.contents` overwrites them.
         current.description = new_node_props.description.or(current.description.take());
         current.r#type = new_node_props.r#type.or(current.r#type.take());
-        current.access = if new_node_props.access != AccessMode::default() { new_node_props.access } else { current.access };
+        current.access = if new_node_props.access != AccessMode::default() {
+            new_node_props.access
+        } else {
+            current.access
+        };
         current.value = new_node_props.value.or(current.value.take());
         current.range = new_node_props.range.or(current.range.take());
         // Merge contents: new_node_props.contents can add to or overwrite current.contents
@@ -148,7 +163,6 @@ impl OscRootNode {
         // Ensure the full_path of the target node is correctly set from new_node_props,
         // as it might have been default-initialized if newly created.
         current.full_path = new_node_props.full_path;
-
 
         self
     }
@@ -163,7 +177,7 @@ impl OscRootNode {
     /// The removed `OscNode` if it existed, or `None` otherwise.
     pub fn remove_node(&mut self, path: &str) -> Option<OscNode> {
         let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
-        
+
         // Cannot remove the root node itself, or an empty path.
         if parts.is_empty() {
             return None;
@@ -179,7 +193,7 @@ impl OscRootNode {
         for i in 0..parts.len() - 1 {
             current = current.contents.get_mut(parts[i])?; // If any part of the parent path is not found, return None.
         }
-        
+
         // `parts.last().unwrap()` is safe because `parts` is not empty.
         // Remove the target node from its parent's `contents` map.
         current.contents.remove(&parts.last().unwrap().to_string())
@@ -227,7 +241,9 @@ pub struct OscNode {
 impl OscNode {
     /// Checks if the node's OSC type tag matches a specific single type.
     pub fn is_type(&self, expected_type: &OscType) -> bool {
-        self.r#type.as_ref().map_or(false, |tag| tag.is_single_type(expected_type))
+        self.r#type
+            .as_ref()
+            .map_or(false, |tag| tag.is_single_type(expected_type))
     }
 
     /// Checks if the node's OSC type tag represents a boolean.
@@ -286,8 +302,9 @@ impl OscTypeTag {
                 }
             }
         }
-        if types.is_empty() && !tag_string.is_empty() { // If input was not empty but no types parsed (e.g. invalid chars)
-             return None;
+        if types.is_empty() && !tag_string.is_empty() {
+            // If input was not empty but no types parsed (e.g. invalid chars)
+            return None;
         }
         Some(OscTypeTag(types))
     }
@@ -350,8 +367,9 @@ impl<'de> Deserialize<'de> for OscTypeTag {
             where
                 E: de::Error,
             {
-                OscTypeTag::from_tag(value)
-                    .ok_or_else(|| de::Error::custom(format!("invalid OSC type tag string: {}", value)))
+                OscTypeTag::from_tag(value).ok_or_else(|| {
+                    de::Error::custom(format!("invalid OSC type tag string: {}", value))
+                })
             }
         }
         deserializer.deserialize_str(OscTypeTagVisitor)
@@ -361,20 +379,20 @@ impl<'de> Deserialize<'de> for OscTypeTag {
 /// Represents individual OSC data types as defined in the OSC 1.0 specification.
 #[derive(Debug, PartialEq, Clone)]
 pub enum OscType {
-    Int32,     // 'i' - 32-bit integer
-    Float32,   // 'f' - 32-bit floating point number
+    Int32,               // 'i' - 32-bit integer
+    Float32,             // 'f' - 32-bit floating point number
     OscString, // 's' - OSC-string (a sequence of non-null ASCII characters followed by a null, etc.)
-    OscBlob,   // 'b' - OSC-blob (an int32 size count followed by that many 8-bit bytes of arbitrary data)
-    Int64,     // 'h' - 64-bit integer (added in some OSC extensions, not strictly OSC 1.0 core)
-    Timetag,   // 't' - OSC-timetag (64-bit NTP format)
-    Double,    // 'd' - 64-bit floating point number (added in some OSC extensions)
-    Symbol,    // 'S' - Alternate type for OSC-string often used for symbolic names
-    Char,      // 'c' - 32-bit ASCII character
+    OscBlob, // 'b' - OSC-blob (an int32 size count followed by that many 8-bit bytes of arbitrary data)
+    Int64,   // 'h' - 64-bit integer (added in some OSC extensions, not strictly OSC 1.0 core)
+    Timetag, // 't' - OSC-timetag (64-bit NTP format)
+    Double,  // 'd' - 64-bit floating point number (added in some OSC extensions)
+    Symbol,  // 'S' - Alternate type for OSC-string often used for symbolic names
+    Char,    // 'c' - 32-bit ASCII character
     RgbaColor, // 'r' - 32-bit RGBA color (four 8-bit unsigned integers)
-    Midi,      // 'm' - 4 byte MIDI message (port ID, status byte, data1, data2)
-    True,      // 'T' - Represents the value True
-    False,     // 'F' - Represents the value False
-    Nil,       // 'N' - Represents "Nil" or "Null"
+    Midi,    // 'm' - 4 byte MIDI message (port ID, status byte, data1, data2)
+    True,    // 'T' - Represents the value True
+    False,   // 'F' - Represents the value False
+    Nil,     // 'N' - Represents "Nil" or "Null"
     Infinitum, // 'I' - Represents "Infinitum" or an impulse, often for triggering events
     Array(Vec<OscType>), // '[' and ']' delimit an array of types. E.g., "[ifs]"
 }
@@ -417,14 +435,20 @@ impl OscType {
 
     /// Returns `true` if the OSC type is a numeric type (Int32, Float32, Int64, Double).
     pub fn is_numeric(&self) -> bool {
-        matches!(self, OscType::Int32 | OscType::Float32 | OscType::Int64 | OscType::Double)
+        matches!(
+            self,
+            OscType::Int32 | OscType::Float32 | OscType::Int64 | OscType::Double
+        )
     }
 
     /// Creates an `OscType` from its single character tag string.
     /// Handles basic types and array types like "[iii]".
     pub fn from_tag(tag_char_or_array_str: &str) -> Option<OscType> {
-        if tag_char_or_array_str.starts_with('[') && tag_char_or_array_str.ends_with(']') && tag_char_or_array_str.len() >= 2 {
-            let inner_tags_str = &tag_char_or_array_str[1..tag_char_or_array_str.len()-1];
+        if tag_char_or_array_str.starts_with('[')
+            && tag_char_or_array_str.ends_with(']')
+            && tag_char_or_array_str.len() >= 2
+        {
+            let inner_tags_str = &tag_char_or_array_str[1..tag_char_or_array_str.len() - 1];
             let mut types = Vec::new();
             let mut chars = inner_tags_str.chars().peekable();
             let mut current_segment = String::new();
@@ -445,7 +469,9 @@ impl OscType {
                             break;
                         }
                     }
-                    if bracket_level != 0 { return None; } // Unmatched brackets
+                    if bracket_level != 0 {
+                        return None;
+                    } // Unmatched brackets
 
                     // current_segment now holds a complete array tag like "[...]"
                     if let Some(array_type_segment) = OscType::from_tag(&current_segment) {
@@ -467,7 +493,8 @@ impl OscType {
                     }
                 }
             }
-            if !current_segment.is_empty() { // Should be empty if all segments parsed correctly
+            if !current_segment.is_empty() {
+                // Should be empty if all segments parsed correctly
                 return None;
             }
             return Some(OscType::Array(types));
@@ -516,7 +543,9 @@ impl<'de> Deserialize<'de> for OscType {
             type Value = OscType;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a valid OSC type tag character (e.g., 'f') or array string (e.g., '[ii]')")
+                formatter.write_str(
+                    "a valid OSC type tag character (e.g., 'f') or array string (e.g., '[ii]')",
+                )
             }
 
             fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
@@ -554,9 +583,9 @@ pub enum OscValue {
     String(String),
     Bool(bool),
     Color(RgbaColorValue), // Changed from String to RgbaColorValue
-    Array(Vec<OscValue>), // For OSC arrays.
-    Empty{}, // For VRChat (potential) bug
-    Nil, // Represents OSC Nil. Serializes to JSON null.
+    Array(Vec<OscValue>),  // For OSC arrays.
+    Empty {},              // For VRChat (potential) bug
+    Nil,                   // Represents OSC Nil. Serializes to JSON null.
 }
 
 /// Represents range information for an OSC node's value.
@@ -614,7 +643,10 @@ impl<'de> Deserialize<'de> for AccessMode {
             1 => Ok(AccessMode::ReadOnly),
             2 => Ok(AccessMode::WriteOnly),
             3 => Ok(AccessMode::ReadWrite),
-            _ => Err(de::Error::custom(format!("invalid access mode integer: {}, expected 0-3", value))),
+            _ => Err(de::Error::custom(format!(
+                "invalid access mode integer: {}, expected 0-3",
+                value
+            ))),
         }
     }
 }

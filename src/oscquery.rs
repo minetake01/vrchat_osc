@@ -9,12 +9,12 @@ use axum::{
 };
 use models::{HostInfo, OscRootNode};
 use serde_json::json;
-use tokio::sync::oneshot::Sender as OneshotSender;
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
     sync::Arc,
 };
+use tokio::sync::oneshot::Sender as OneshotSender;
 use tokio::{
     net::{TcpListener, ToSocketAddrs},
     sync::RwLock,
@@ -142,9 +142,9 @@ async fn handle_root(
 /// Axum handler for requests to any path ("/{*path}").
 /// Returns information about the OSC node at the requested path or specific attributes.
 async fn handle_path(
-    AxumPath(path_str): AxumPath<String>,              // The requested path string (e.g., "avatar/parameters/SomeParameter").
+    AxumPath(path_str): AxumPath<String>, // The requested path string (e.g., "avatar/parameters/SomeParameter").
     Query(params): Query<HashMap<String, String>>, // Query parameters from the URL.
-    State(state): State<Arc<OscQueryState>>,       // Shared server state.
+    State(state): State<Arc<OscQueryState>>, // Shared server state.
 ) -> impl IntoResponse {
     // Construct the full OSC path by prepending "/".
     let full_path = format!("/{}", path_str);
@@ -157,7 +157,8 @@ async fn handle_path(
     if params.is_empty() {
         // If no query parameters are provided, return the entire OSC node as JSON.
         Json(json!(node)).into_response()
-    } else if params.contains_key("HOST_INFO") { // Check specifically for HOST_INFO query.
+    } else if params.contains_key("HOST_INFO") {
+        // Check specifically for HOST_INFO query.
         // If "HOST_INFO" query parameter is present, return the server's HostInfo as JSON.
         let host_info_guard = state.host_info.read().await;
         Json(json!(*host_info_guard)).into_response()
@@ -175,11 +176,22 @@ async fn handle_path(
             Json(json!({ attr_key_uppercase: value })).into_response()
         } else {
             // If the attribute is not found on the node, return 404 Not Found.
-            (StatusCode::NOT_FOUND, format!("Attribute {} not found on node {}", attr_key_uppercase, full_path)).into_response()
+            (
+                StatusCode::NOT_FOUND,
+                format!(
+                    "Attribute {} not found on node {}",
+                    attr_key_uppercase, full_path
+                ),
+            )
+                .into_response()
         }
     } else {
         // If multiple query parameters are provided (and it's not a recognized pattern),
         // return a 400 Bad Request response.
-        (StatusCode::BAD_REQUEST, "Invalid or too many query parameters. Use a single attribute query or HOST_INFO.").into_response()
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid or too many query parameters. Use a single attribute query or HOST_INFO.",
+        )
+            .into_response()
     }
 }

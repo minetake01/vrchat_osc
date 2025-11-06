@@ -4,7 +4,8 @@ mod utils;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
-    sync::Arc, time::Duration
+    sync::Arc,
+    time::Duration,
 };
 
 use hickory_proto::{
@@ -18,7 +19,10 @@ use tokio::{
     sync::{mpsc, RwLock},
     task::JoinHandle,
 };
-use utils::{create_mdns_response_message, send_to_mdns, setup_multicast_socket_v4, setup_multicast_socket_v6};
+use utils::{
+    create_mdns_response_message, send_to_mdns, setup_multicast_socket_v4,
+    setup_multicast_socket_v6,
+};
 
 /// Maximum number of attempts to send a multicast message.
 const MAX_SEND_ATTEMPTS: usize = 3;
@@ -78,9 +82,7 @@ impl Mdns {
     /// # Returns
     /// A `Result` containing the new `Mdns` instance or an `Error` if initialization fails
     /// (e.g., if no sockets could be bound).
-    pub async fn new(
-        notifier_tx: mpsc::Sender<(Name, SocketAddr)>,
-    ) -> Result<Self, Error> {
+    pub async fn new(notifier_tx: mpsc::Sender<(Name, SocketAddr)>) -> Result<Self, Error> {
         let registered_services = Arc::new(RwLock::new(HashMap::new()));
         let service_cache = Arc::new(RwLock::new(HashMap::new()));
         let follow_services = Arc::new(RwLock::new(HashSet::new()));
@@ -91,7 +93,7 @@ impl Mdns {
             setup_multicast_socket_v4().await,
             setup_multicast_socket_v6().await,
         );
-        
+
         if socket_v4.is_err() && socket_v6.is_err() {
             log::error!("Failed to bind any multicast sockets for mDNS");
             return Err(Error::SocketBindError {
@@ -102,7 +104,10 @@ impl Mdns {
 
         match socket_v4 {
             Ok(socket) => {
-                log::info!("Successfully bound to IPv4 multicast socket: {:?}", socket.local_addr());
+                log::info!(
+                    "Successfully bound to IPv4 multicast socket: {:?}",
+                    socket.local_addr()
+                );
                 let socket = Arc::new(socket);
                 tasks.push(MdnsTask {
                     socket: socket.clone(),
@@ -122,7 +127,10 @@ impl Mdns {
 
         match socket_v6 {
             Ok(socket) => {
-                log::info!("Successfully bound to IPv6 multicast socket: {:?}", socket.local_addr());
+                log::info!(
+                    "Successfully bound to IPv6 multicast socket: {:?}",
+                    socket.local_addr()
+                );
                 let socket = Arc::new(socket);
                 tasks.push(MdnsTask {
                     socket: socket.clone(),
@@ -179,7 +187,9 @@ impl Mdns {
                 if let Err(e) = send_to_mdns(&task.socket, &bytes).await {
                     log::error!(
                         "Failed to send registration announcement for {} via {:?}: {}",
-                        instance_name, task.socket.local_addr().ok(), e
+                        instance_name,
+                        task.socket.local_addr().ok(),
+                        e
                     );
                 }
             }
@@ -209,13 +219,19 @@ impl Mdns {
                 removed = true;
                 if instances.is_empty() {
                     services_guard.remove(&base_service_name);
-                    log::info!("Removed service type from registry as no instances remain: {}", base_service_name);
+                    log::info!(
+                        "Removed service type from registry as no instances remain: {}",
+                        base_service_name
+                    );
                 }
             }
         }
 
         if !removed {
-            log::warn!("Attempted to unregister a non-existent service instance: {}", instance_name);
+            log::warn!(
+                "Attempted to unregister a non-existent service instance: {}",
+                instance_name
+            );
         }
         Ok(())
     }
@@ -247,7 +263,9 @@ impl Mdns {
             if let Err(e) = send_to_mdns(&task.socket, &bytes).await {
                 log::error!(
                     "Failed to send follow query for {} via {:?}: {}",
-                    service_type_name, task.socket.local_addr().ok(), e
+                    service_type_name,
+                    task.socket.local_addr().ok(),
+                    e
                 );
             }
         }
@@ -263,7 +281,10 @@ impl Mdns {
         if follow_guard.remove(&service_type_name) {
             log::info!("Stopped following service type: {}", service_type_name);
         } else {
-            log::debug!("Attempted to unfollow a service type not being followed: {}", service_type_name);
+            log::debug!(
+                "Attempted to unfollow a service type not being followed: {}",
+                service_type_name
+            );
         }
     }
 
@@ -296,7 +317,9 @@ impl Mdns {
     /// An `Option<(Name, SocketAddr)>` containing the service if found, otherwise `None`.
     pub async fn find_service_by_name(&self, instance_name: &Name) -> Option<(Name, SocketAddr)> {
         let cache_guard = self.service_cache.read().await;
-        cache_guard.get(instance_name).map(|addr| (instance_name.clone(), *addr))
+        cache_guard
+            .get(instance_name)
+            .map(|addr| (instance_name.clone(), *addr))
     }
 }
 

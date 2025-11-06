@@ -48,10 +48,7 @@ pub async fn setup_multicast_socket_v6() -> Result<UdpSocket, std::io::Error> {
 ///
 /// # Returns
 /// A `Result` containing the number of bytes sent, or an `std::io::Error` if sending fails.
-pub async fn send_to_mdns(
-    socket: &UdpSocket,
-    bytes: &[u8],
-) -> Result<usize, std::io::Error> {
+pub async fn send_to_mdns(socket: &UdpSocket, bytes: &[u8]) -> Result<usize, std::io::Error> {
     let local_addr = socket.local_addr()?; // Get the local address of the socket
 
     // Determine the mDNS multicast address based on the IP version of the local socket.
@@ -109,12 +106,7 @@ pub fn create_mdns_response_message(instance_name: &Name, addr: SocketAddr) -> M
     message.add_additional(Record::from_rdata(
         instance_name.clone(),
         RECORD_TTL,
-        RData::SRV(SRV::new(
-            0,
-            0,
-            addr.port(),
-            instance_name.clone(),
-        )),
+        RData::SRV(SRV::new(0, 0, addr.port(), instance_name.clone())),
     ));
 
     // --- A or AAAA Record (Additional Section) ---
@@ -181,7 +173,9 @@ pub fn extract_service_info(message: &Message) -> Option<(Name, SocketAddr)> {
                     srv_actual_target_host = Some(srv_data.target().clone());
                     log::trace!(
                         "Found SRV record: {} port {} target {}",
-                        record.name(), srv_data.port(), srv_data.target()
+                        record.name(),
+                        srv_data.port(),
+                        srv_data.target()
                     );
                 }
             }
@@ -205,13 +199,27 @@ pub fn extract_service_info(message: &Message) -> Option<(Name, SocketAddr)> {
         }
     }
 
-    if let (Some(instance_name), Some(srv_owner), Some(port), Some(srv_target), Some(ip_addr_val), Some(ip_owner)) =
-        (ptr_instance_name.clone(), srv_target_name.clone(), srv_port, srv_actual_target_host.clone(), ip_address, ip_owner_name.clone())
-    {
+    if let (
+        Some(instance_name),
+        Some(srv_owner),
+        Some(port),
+        Some(srv_target),
+        Some(ip_addr_val),
+        Some(ip_owner),
+    ) = (
+        ptr_instance_name.clone(),
+        srv_target_name.clone(),
+        srv_port,
+        srv_actual_target_host.clone(),
+        ip_address,
+        ip_owner_name.clone(),
+    ) {
         if srv_owner == instance_name && ip_owner == srv_target {
             log::debug!(
                 "Successfully extracted service info: Name='{}', IP='{}', Port='{}'",
-                instance_name, ip_addr_val, port
+                instance_name,
+                ip_addr_val,
+                port
             );
             return Some((instance_name, SocketAddr::new(ip_addr_val, port)));
         } else {

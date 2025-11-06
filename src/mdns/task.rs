@@ -50,11 +50,17 @@ pub async fn server_task(
         let (len, sender_addr) = match socket.recv_from(&mut buf).await {
             Ok((len, addr)) => (len, addr),
             Err(e) => {
-                if e.kind() == std::io::ErrorKind::ConnectionReset || e.kind() == std::io::ErrorKind::BrokenPipe {
+                if e.kind() == std::io::ErrorKind::ConnectionReset
+                    || e.kind() == std::io::ErrorKind::BrokenPipe
+                {
                     log::warn!("Socket connection error ({}). Task for {:?} might need to be restarted or interface is down.", e, socket.local_addr().ok());
                     break;
                 } else {
-                    log::error!("Failed to receive data on mDNS socket {:?}: {}", socket.local_addr().ok(), e);
+                    log::error!(
+                        "Failed to receive data on mDNS socket {:?}: {}",
+                        socket.local_addr().ok(),
+                        e
+                    );
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 continue;
@@ -70,7 +76,12 @@ pub async fn server_task(
         let message = match Message::from_bytes(&buf[..len]) {
             Ok(msg) => msg,
             Err(e) => {
-                log::warn!("Failed to parse mDNS message from bytes ({} bytes received) from {}: {}", len, sender_addr, e);
+                log::warn!(
+                    "Failed to parse mDNS message from bytes ({} bytes received) from {}: {}",
+                    len,
+                    sender_addr,
+                    e
+                );
                 continue;
             }
         };
@@ -83,18 +94,12 @@ pub async fn server_task(
             );
             continue;
         }
-        
+
         // Process the message based on whether it's a query or a response.
         match message.message_type() {
             MessageType::Query => {
                 // Handle incoming mDNS queries.
-                handle_query(
-                    message,
-                    socket.clone(),
-                    &registered_services,
-                    sender_addr,
-                )
-                .await;
+                handle_query(message, socket.clone(), &registered_services, sender_addr).await;
             }
             MessageType::Response => {
                 // Handle incoming mDNS responses.
@@ -160,11 +165,19 @@ async fn handle_query(
                     match response.to_bytes() {
                         Ok(bytes) => {
                             if let Err(e) = socket.send_to(&bytes, sender_addr).await {
-                                log::error!("Failed to send response for instance {}: {}", instance_name, e);
+                                log::error!(
+                                    "Failed to send response for instance {}: {}",
+                                    instance_name,
+                                    e
+                                );
                             }
                         }
                         Err(e) => {
-                            log::error!("Failed to serialize response for instance {}: {}", instance_name, e);
+                            log::error!(
+                                "Failed to serialize response for instance {}: {}",
+                                instance_name,
+                                e
+                            );
                         }
                     }
                 }
@@ -182,7 +195,7 @@ async fn handle_query(
             if let Some(instances_map) = services_guard.get(&service_type_key) {
                 // Now check if the specific instance `query.name()` is in this map.
                 if let Some(&addr) = instances_map.get(query.name()) {
-                     log::info!(
+                    log::info!(
                         "Responding to specific query for registered service instance: {} at {}",
                         query_name_str,
                         addr
@@ -191,11 +204,19 @@ async fn handle_query(
                     match response.to_bytes() {
                         Ok(bytes) => {
                             if let Err(e) = socket.send_to(&bytes, sender_addr).await {
-                                log::error!("Failed to send response for instance {}: {}", query.name(), e);
+                                log::error!(
+                                    "Failed to send response for instance {}: {}",
+                                    query.name(),
+                                    e
+                                );
                             }
                         }
                         Err(e) => {
-                            log::error!("Failed to serialize response for instance {}: {}", query.name(), e);
+                            log::error!(
+                                "Failed to serialize response for instance {}: {}",
+                                query.name(),
+                                e
+                            );
                         }
                     }
                 }
@@ -226,7 +247,9 @@ async fn handle_response(
     // Extract service information (name, IP, port) from the message.
     // `extract_service_info` is expected to look at PTR, SRV, A/AAAA records.
     // The custom packet format might mean `extract_service_info` needs to be robust.
-    if let Some((discovered_instance_name, discovered_addr)) = extract_service_info(&response_message) {
+    if let Some((discovered_instance_name, discovered_addr)) =
+        extract_service_info(&response_message)
+    {
         log::debug!(
             "Potential service discovered in response: {} at {}",
             discovered_instance_name,
@@ -242,9 +265,11 @@ async fn handle_response(
             let follow_guard = follow_services.read().await;
             let registered_services_guard = registered_services.read().await;
             follow_guard.contains(&service_type_name)
-                && !registered_services_guard.get(&service_type_name).map_or(false, |instances| {
-                    instances.contains_key(&discovered_instance_name)   // Check if the instance is owned by us
-                })
+                && !registered_services_guard
+                    .get(&service_type_name)
+                    .map_or(false, |instances| {
+                        instances.contains_key(&discovered_instance_name) // Check if the instance is owned by us
+                    })
         };
 
         if is_following {
@@ -257,28 +282,39 @@ async fn handle_response(
                 // If it's a new service or its address changed.
                 log::info!(
                     "Service cache updated for: {} at {} (was {:?})",
-                    discovered_instance_name, discovered_addr, old_value
+                    discovered_instance_name,
+                    discovered_addr,
+                    old_value
                 );
 
                 // If the service was newly added or updated, and we are following its type, notify listeners.
-                if let Err(e) = notifier_tx.send((discovered_instance_name.clone(), discovered_addr)).await {
+                if let Err(e) = notifier_tx
+                    .send((discovered_instance_name.clone(), discovered_addr))
+                    .await
+                {
                     log::error!(
                         "Failed to send notification for discovered service {}: {}",
-                        discovered_instance_name, e
+                        discovered_instance_name,
+                        e
                     );
                 } else {
-                    log::debug!("Sent notification for service: {}", discovered_instance_name);
+                    log::debug!(
+                        "Sent notification for service: {}",
+                        discovered_instance_name
+                    );
                 }
             } else {
                 log::debug!(
                     "Service cache already up-to-date for: {} at {}",
-                    discovered_instance_name, discovered_addr
+                    discovered_instance_name,
+                    discovered_addr
                 );
             }
         } else {
             log::trace!(
                 "Ignoring discovered service {} of type {} because not followed.",
-                discovered_instance_name, service_type_name
+                discovered_instance_name,
+                service_type_name
             );
         }
     } else {

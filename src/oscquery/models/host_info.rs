@@ -33,12 +33,12 @@ impl HostInfo {
             // Default set of supported OSCQuery extensions.
             // Applications should accurately reflect which extensions they truly support.
             extensions: HashMap::from([
-                ("ACCESS".to_string(), true),      // Supports querying node access mode.
-                ("CLIPMODE".to_string(), false),   // Example: Not supporting CLIPMODE by default.
-                ("RANGE".to_string(), true),       // Supports querying node value ranges.
-                ("TYPE".to_string(), true),        // Supports querying node OSC types.
-                ("VALUE".to_string(), true),       // Supports querying current node values.
-                // "DESCRIPTION" is another common one, could be added if supported.
+                ("ACCESS".to_string(), true),    // Supports querying node access mode.
+                ("CLIPMODE".to_string(), false), // Example: Not supporting CLIPMODE by default.
+                ("RANGE".to_string(), true),     // Supports querying node value ranges.
+                ("TYPE".to_string(), true),      // Supports querying node OSC types.
+                ("VALUE".to_string(), true),     // Supports querying current node values.
+                                                 // "DESCRIPTION" is another common one, could be added if supported.
             ]),
             osc_ip,
             osc_port,
