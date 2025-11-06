@@ -171,7 +171,7 @@ impl Mdns {
 
         log::info!("Registered service: {} at {}", instance_name, addr);
 
-        let response_message = convert_to_message(&instance_name, addr);
+        let response_message = create_mdns_response_message(&instance_name, addr);
         let bytes = response_message.to_bytes()?;
 
         for _ in 0..MAX_SEND_ATTEMPTS {

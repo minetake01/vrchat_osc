@@ -1,5 +1,4 @@
-use vrchat_osc::{models::OscRootNode, Error, ServiceType, VRChatOSC};
-use rosc::{OscMessage, OscPacket};
+use vrchat_osc::{models::OscRootNode, rosc::{OscMessage, OscPacket}, Error, ServiceType, VRChatOSC};
 use tokio;
 
 #[tokio::main]
