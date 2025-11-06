@@ -30,32 +30,33 @@ async fn main() -> Result<(), Error> {
                 log::info!("Sent message to OSC server.");
             });
         }
-       ServiceType::OscQuery(name, addr) => {
-                log::info!("Connected to OSCQuery server: {} at {}", name, addr);
-                let vrchat_osc = cloned_vrchat_osc.clone();
-                // Get parameters from the OSCQuery server
-                tokio::spawn(async move {
-                    const RETRY_COUNT:u8=10;
-                    let mut counter =0;
-                    // If VRChat has just started, it is possible that valid values may not be returned immediately.
-                    let params = loop{
-                        if counter==RETRY_COUNT{
-                            panic!("failed to get parameters after {} tries",RETRY_COUNT);
-                        }
-                        counter+=1;
-                        match vrchat_osc
-                            .get_parameter_from_addr("/avatar/parameters", addr)
-                            .await
-                        {
-                            Ok(v) => {break v},
-                            Err(_) => {
-                                tokio::time::sleep(Duration::from_millis(500)).await;
-                            },
-                        }
-                    };
-                    log::info!("Received parameters: {:?}", params);
-                });
-            }
+        ServiceType::OscQuery(name, addr) => {
+            log::info!("Connected to OSCQuery server: {} at {}", name, addr);
+            let vrchat_osc = cloned_vrchat_osc.clone();
+            // Get parameters from the OSCQuery server
+            tokio::spawn(async move {
+                const RETRY_COUNT: u8 = 10;
+                let mut counter = 0;
+                // Valid values may not be returned immediately after VRChat starts, as avatars might still be loading.
+                let params = loop {
+                    if counter == RETRY_COUNT {
+                        panic!("failed to get parameters after {} tries", RETRY_COUNT);
+                    }
+                    counter += 1;
+                    
+                    match vrchat_osc
+                        .get_parameter_from_addr("/avatar/parameters", addr)
+                        .await
+                    {
+                        Ok(v) => { break v },
+                        Err(_) => {
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+                        },
+                    }
+                };
+                log::info!("Received parameters: {:?}", params);
+            });
+        }
     }).await;
 
     // Register a test service
