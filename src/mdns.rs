@@ -18,7 +18,7 @@ use tokio::{
     sync::{mpsc, RwLock},
     task::JoinHandle,
 };
-use utils::{convert_to_message, send_to_mdns, setup_multicast_socket_v4, setup_multicast_socket_v6};
+use utils::{create_mdns_response_message, send_to_mdns, setup_multicast_socket_v4, setup_multicast_socket_v6};
 
 /// Maximum number of attempts to send a multicast message.
 const MAX_SEND_ATTEMPTS: usize = 3;
