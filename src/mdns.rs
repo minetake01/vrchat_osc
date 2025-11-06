@@ -12,14 +12,13 @@ use hickory_proto::{
     rr::{Name, RecordType},
     serialize::binary::BinEncodable,
 };
-use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use task::server_task;
 use tokio::{
     net::UdpSocket,
     sync::{mpsc, RwLock},
     task::JoinHandle,
 };
-use utils::{convert_to_message, send_to_mdns, setup_multicast_socket};
+use utils::{create_mdns_response_message, send_to_mdns, setup_multicast_socket_v4, setup_multicast_socket_v6};
 
 /// Maximum number of attempts to send a multicast message.
 const MAX_SEND_ATTEMPTS: usize = 3;
@@ -27,17 +26,16 @@ const MAX_SEND_ATTEMPTS: usize = 3;
 /// Error types that can occur during mDNS operations.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-	#[error("Network Interface Error: {0}")]
-	NetworkInterfaceError(#[from] network_interface::Error),
     #[error("DNS Protocol Error: {0}")]
     MdnsProtoError(#[from] hickory_proto::ProtoError),
     #[error("I/O Error: {0}")]
     IoError(#[from] std::io::Error),
 
-    /// This error indicates an unexpected internal state, typically an invalid IP version
-    /// where IPv4 or IPv6 was expected but something else was encountered.
-    #[error("Invalid IP Version - Expected IPv4 or IPv6 based on context")]
-    InvalidIpVersion,
+    #[error("Socket Binding Error: IPv4: {ipv4}, IPv6: {ipv6}")]
+    SocketBindError {
+        ipv4: std::io::Error,
+        ipv6: std::io::Error,
+    },
 }
 
 /// Represents a task associated with a UDP socket for mDNS operations.
@@ -89,30 +87,56 @@ impl Mdns {
         let mut tasks = Vec::new();
 
         // Attempt to bind a UDP socket for multicast
-		let interfaces = NetworkInterface::show()?;
-		for interface in interfaces {
-            for addr in interface.addr {
-                if addr.ip().is_loopback() { continue; }
-                
-                match setup_multicast_socket(interface.index, addr.ip()).await {
-                    Ok(socket) => {
-                        log::info!("Successfully bound to multicast socket: {:?}", socket.local_addr());
-                        let socket = Arc::new(socket);
-                        tasks.push(MdnsTask {
-                            socket: socket.clone(),
-                            handle: tokio::spawn(server_task(
-                                socket,
-                                notifier_tx.clone(),
-                                registered_services.clone(),
-                                service_cache.clone(),
-                                follow_services.clone(),
-                            )),
-                        });
-                    }
-                    Err(e) => {
-                        log::error!("Failed to bind to multicast socket: {}", e);
-                    }
-                }
+        let (socket_v4, socket_v6) = (
+            setup_multicast_socket_v4().await,
+            setup_multicast_socket_v6().await,
+        );
+        
+        if socket_v4.is_err() && socket_v6.is_err() {
+            log::error!("Failed to bind any multicast sockets for mDNS");
+            return Err(Error::SocketBindError {
+                ipv4: socket_v4.err().unwrap(),
+                ipv6: socket_v6.err().unwrap(),
+            });
+        }
+
+        match socket_v4 {
+            Ok(socket) => {
+                log::info!("Successfully bound to IPv4 multicast socket: {:?}", socket.local_addr());
+                let socket = Arc::new(socket);
+                tasks.push(MdnsTask {
+                    socket: socket.clone(),
+                    handle: tokio::spawn(server_task(
+                        socket,
+                        notifier_tx.clone(),
+                        registered_services.clone(),
+                        service_cache.clone(),
+                        follow_services.clone(),
+                    )),
+                });
+            }
+            Err(e) => {
+                log::warn!("Failed to bind IPv4 multicast socket: {}", e);
+            }
+        }
+
+        match socket_v6 {
+            Ok(socket) => {
+                log::info!("Successfully bound to IPv6 multicast socket: {:?}", socket.local_addr());
+                let socket = Arc::new(socket);
+                tasks.push(MdnsTask {
+                    socket: socket.clone(),
+                    handle: tokio::spawn(server_task(
+                        socket,
+                        notifier_tx.clone(),
+                        registered_services.clone(),
+                        service_cache.clone(),
+                        follow_services.clone(),
+                    )),
+                });
+            }
+            Err(e) => {
+                log::warn!("Failed to bind IPv6 multicast socket: {}", e);
             }
         }
 
@@ -147,7 +171,7 @@ impl Mdns {
 
         log::info!("Registered service: {} at {}", instance_name, addr);
 
-        let response_message = convert_to_message(&instance_name, addr);
+        let response_message = create_mdns_response_message(&instance_name, addr);
         let bytes = response_message.to_bytes()?;
 
         for _ in 0..MAX_SEND_ATTEMPTS {

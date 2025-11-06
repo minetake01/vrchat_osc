@@ -42,11 +42,20 @@ impl OscRootNode {
         })
     }
     
-    /// Utility method to quickly add a "/dolly" node (example).
+    /// Utility method to quickly add a "/dolly" node.
     pub fn with_dolly(self) -> Self {
         self.add_node(OscNode {
             full_path: "/dolly".to_string(),
             description: Some("Parameters related to camera dolly or movement.".to_string()),
+            ..Default::default()
+        })
+    }
+
+    /// Utility method to quickly add a "/usercamera" node.
+    pub fn with_usercamera(self) -> Self {
+        self.add_node(OscNode {
+            full_path: "/usercamera".to_string(),
+            description: Some("Parameters related to the user's camera.".to_string()),
             ..Default::default()
         })
     }
