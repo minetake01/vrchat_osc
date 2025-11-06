@@ -5,6 +5,10 @@
 
 **`vrchat_osc` is a Rust crate designed to easily utilize VRChat's OSC (Open Sound Control) and OSCQuery protocols.**
 
+> [!WARNING]
+> In the current implementation (v1.3.0), to support operation on Linux environments the mDNS socket is bound to `0.0.0.0:5353` (and `[::]:5353`). This may cause conflicts if other mDNS services are running on the same machine. We plan to remove this restriction in the future. (See [Issue #9](https://github.com/minetake01/vrchat_osc/issues/9) for details.)
+> If you do not intend to use it on Linux, you might prefer to explicitly use `v1.2.0`.
+
 This crate aims to help VRChat tool developers efficiently perform operations such as manipulating avatar parameters, retrieving information, and providing custom OSC services. It integrates OSC message sending/receiving with service discovery via mDNS for OSCQuery.
 
 ## Key Features
@@ -24,7 +28,7 @@ To use this crate, add the following dependencies to your `Cargo.toml`:
 [dependencies]
 vrchat_osc = "1"
 tokio = { version = "1", features = ["full"] }
-````
+```
 
 ## Usage Example
 A basic usage example of this crate can be found in [examples/full.rs](./examples/full.rs).
@@ -35,7 +39,7 @@ This project is licensed under the terms of either the MIT license or the Apache
 
 ## Contribution
 
-Contributions are welcome\! Please follow these steps:
+Contributions are welcome! Please follow these steps:
 
 1.  Fork the repository.
 2.  Create a new branch for your changes.
