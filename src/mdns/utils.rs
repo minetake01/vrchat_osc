@@ -19,6 +19,8 @@ const RECORD_TTL: u32 = 120;
 pub async fn setup_multicast_socket_v4() -> Result<UdpSocket, std::io::Error> {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
     socket.set_reuse_address(true)?;
+    #[cfg(target_family = "unix")]
+    socket.set_reuse_port(true)?;
     socket.set_multicast_loop_v4(true)?;
     socket.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, MDNS_PORT).into())?;
     socket.set_nonblocking(true)?;
@@ -30,6 +32,8 @@ pub async fn setup_multicast_socket_v4() -> Result<UdpSocket, std::io::Error> {
 pub async fn setup_multicast_socket_v6() -> Result<UdpSocket, std::io::Error> {
     let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
     socket.set_reuse_address(true)?;
+    #[cfg(target_family = "unix")]
+    socket.set_reuse_port(true)?;
     socket.set_multicast_loop_v6(true)?;
     socket.bind(&SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, MDNS_PORT, 0, 0).into())?;
     socket.set_nonblocking(true)?;
