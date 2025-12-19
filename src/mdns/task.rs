@@ -39,7 +39,7 @@ const BUFFER_SIZE: usize = 4096;
 pub async fn server_task(
     socket: Arc<UdpSocket>,
     notifier_tx: mpsc::Sender<(Name, SocketAddr)>,
-    registered_services: Arc<RwLock<HashMap<Name, HashMap<Name, SocketAddr>>>>,
+    registered_services: Arc<RwLock<HashMap<Name, HashMap<Name, u16>>>>,
     service_cache: Arc<RwLock<HashMap<Name, SocketAddr>>>,
     follow_services: Arc<RwLock<HashSet<Name>>>,
 ) {
@@ -130,7 +130,7 @@ pub async fn server_task(
 async fn handle_query(
     query_message: Message,
     socket: Arc<UdpSocket>,
-    registered_services: &Arc<RwLock<HashMap<Name, HashMap<Name, SocketAddr>>>>,
+    registered_services: &Arc<RwLock<HashMap<Name, HashMap<Name, u16>>>>,
     sender_addr: SocketAddr,
 ) {
     // Iterate over each query in the mDNS message.
@@ -154,15 +154,20 @@ async fn handle_query(
         if query.query_type() == RecordType::PTR || query.query_type() == RecordType::ANY {
             // `query.name()` is the service type, e.g. `_oscjson._tcp.local.`
             if let Some(instances_map) = services_guard.get(query.name()) {
-                for (instance_name, &addr) in instances_map.iter() {
+                for (instance_name, &port) in instances_map.iter() {
                     log::info!(
                         "Responding to PTR/ANY query for service type {} with instance: {} at {}",
                         query_name_str,
                         instance_name,
-                        addr
+                        port
                     );
-                    let response = create_mdns_response_message(instance_name, addr);
-                    match response.to_bytes() {
+					let Ok(socket_local_addr) = socket.local_addr() else {
+						log::error!("Failed to get local address of socket for responding to query.");
+						continue;
+					};
+                    let response_message = create_mdns_response_message(instance_name, socket_local_addr.ip(), port);
+					let bytes = response_message.to_bytes();
+                    match bytes {
                         Ok(bytes) => {
                             if let Err(e) = socket.send_to(&bytes, sender_addr).await {
                                 log::error!(
@@ -200,8 +205,13 @@ async fn handle_query(
                         query_name_str,
                         addr
                     );
-                    let response = create_mdns_response_message(query.name(), addr); // Use query.name() as it's the instance name
-                    match response.to_bytes() {
+					let Ok(socket_local_addr) = socket.local_addr() else {
+						log::error!("Failed to get local address of socket for responding to query.");
+						continue;
+					};
+                    let response_message = create_mdns_response_message(query.name(), socket_local_addr.ip(), addr); // Use query.name() as it's the instance name
+					let bytes = response_message.to_bytes();
+                    match bytes {
                         Ok(bytes) => {
                             if let Err(e) = socket.send_to(&bytes, sender_addr).await {
                                 log::error!(
@@ -240,7 +250,7 @@ async fn handle_query(
 async fn handle_response(
     response_message: Message,
     notifier_tx: &mpsc::Sender<(Name, SocketAddr)>,
-    registered_services: &Arc<RwLock<HashMap<Name, HashMap<Name, SocketAddr>>>>,
+    registered_services: &Arc<RwLock<HashMap<Name, HashMap<Name, u16>>>>,
     service_cache: &Arc<RwLock<HashMap<Name, SocketAddr>>>,
     follow_services: &Arc<RwLock<HashSet<Name>>>,
 ) {

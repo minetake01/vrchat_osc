@@ -83,7 +83,7 @@ pub async fn send_to_mdns(socket: &UdpSocket, bytes: &[u8]) -> Result<usize, std
 ///
 /// # Returns
 /// An mDNS `Message` configured as a response, ready to be serialized and sent.
-pub fn create_mdns_response_message(instance_name: &Name, addr: SocketAddr) -> Message {
+pub fn create_mdns_response_message(instance_name: &Name, socket_ip: IpAddr, port: u16) -> Message {
     let mut message = Message::new();
     message
         .set_id(0)
@@ -110,12 +110,12 @@ pub fn create_mdns_response_message(instance_name: &Name, addr: SocketAddr) -> M
     message.add_additional(Record::from_rdata(
         instance_name.clone(),
         RECORD_TTL,
-        RData::SRV(SRV::new(0, 0, addr.port(), instance_name.clone())),
+        RData::SRV(SRV::new(0, 0, port, instance_name.clone())),
     ));
 
     // --- A or AAAA Record (Additional Section) ---
     // Provides the IP address for the target host specified in the SRV record (here, `instance_name`).
-    match addr.ip() {
+    match socket_ip {
         IpAddr::V4(ipv4_addr) => {
             message.add_additional(Record::from_rdata(
                 instance_name.clone(),

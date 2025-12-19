@@ -59,7 +59,7 @@ pub struct Mdns {
     /// The first key is the service type name (e.g., `_oscjson._tcp.local.`).
     /// The second key is the service instance name (e.g., `MyInstance._oscjson._tcp.local.`),
     /// mapped to its `SocketAddr`.
-    registered_services: Arc<RwLock<HashMap<Name, HashMap<Name, SocketAddr>>>>,
+    registered_services: Arc<RwLock<HashMap<Name, HashMap<Name, u16>>>>,
 
     /// Cache of discovered services.
     /// Maps service instance name to its `SocketAddr`.
@@ -160,30 +160,32 @@ impl Mdns {
     ///
     /// This adds the service to an internal registry and advertises it on the network
     /// across all active interfaces (via the wildcard-bound sockets). The service is identified
-    /// by its instance name and its network address.
+    /// by its instance name and its port number.
     ///
     /// # Arguments
     /// * `instance_name` - The unique name of the service instance (e.g., `VRChat-Client-1234._oscjson._tcp.local.`).
-    /// * `addr` - The `SocketAddr` (IP address and port) where the service is hosted.
+    /// * `port` - The port number where the service is hosted.
     ///
     /// # Returns
     /// A `Result` indicating success or an `Error` if registration fails.
-    pub async fn register(&self, instance_name: Name, addr: SocketAddr) -> Result<(), Error> {
+    pub async fn register(&self, instance_name: Name, port: u16) -> Result<(), Error> {
         let base_service_name = instance_name.trim_to(3);
 
         {
             let mut services_guard = self.registered_services.write().await;
             let instances = services_guard.entry(base_service_name.clone()).or_default();
-            instances.insert(instance_name.clone(), addr);
+            instances.insert(instance_name.clone(), port);
         }
 
-        log::info!("Registered service: {} at {}", instance_name, addr);
+        log::info!("Registered service: {} at {}", instance_name, port);
 
-        let response_message = create_mdns_response_message(&instance_name, addr);
-        let bytes = response_message.to_bytes()?;
 
         for _ in 0..MAX_SEND_ATTEMPTS {
             for task in &self.tasks {
+				let socket_ip = task.socket.local_addr()?.ip();
+				let response_message = create_mdns_response_message(&instance_name, socket_ip, port);
+				let bytes = response_message.to_bytes()?;
+
                 if let Err(e) = send_to_mdns(&task.socket, &bytes).await {
                     log::error!(
                         "Failed to send registration announcement for {} via {:?}: {}",
