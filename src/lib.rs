@@ -153,8 +153,8 @@ impl VRChatOSC {
         F: Fn(OscPacket) + Send + 'static,
     {
         // Start OSC server (UDP listener)
-        // Bind to localhost on an OS-assigned port.
-        let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).await?;
+        // Bind to an ephemeral port on all interfaces.
+        let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)).await?;
         let osc_local_addr = socket.local_addr()?; // Get the actual address it bound to.
 
         // Spawn a task to handle incoming OSC packets.
@@ -198,9 +198,9 @@ impl VRChatOSC {
             osc_local_addr.port(), // Use the port of the OSC server.
         );
         let mut osc_query = OscQuery::new(host_info, parameters);
-        // Serve OSCQuery on localhost with an OS-assigned port.
+        // Serve OSCQuery on an ephemeral port on all interfaces.
         let osc_query_local_addr = osc_query
-            .serve(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .serve(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
             .await?;
 
         // Create mDNS service announcements.
