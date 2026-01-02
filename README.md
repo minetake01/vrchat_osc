@@ -7,6 +7,8 @@
 
 This crate aims to help VRChat tool developers efficiently perform operations such as manipulating avatar parameters, retrieving information, and providing custom OSC services. It integrates OSC message sending/receiving with service discovery via mDNS for OSCQuery.
 
+VRChat's OSCQuery implementation currently mandates a specific mDNS answer layout (a PTR record pointing to a service instance plus matching SRV and A/AAAA records for that instance). The helpers in `src/mdns/utils.rs` build and parse that exact structure, so the crate ignores other mDNS variants that would be needed for a general OSCQuery client. For that reason, the current implementation is limited to talking with VRChat-style services.
+
 ## Known Issues
 
 > [!WARNING]
