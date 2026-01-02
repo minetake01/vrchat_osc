@@ -1,4 +1,7 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::{
+    collections::HashSet,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+};
 
 use hickory_proto::{
     op::{Message, MessageType, OpCode},
@@ -7,38 +10,67 @@ use hickory_proto::{
         Name, RData, Record,
     },
 };
-use socket2::{Domain, Protocol, Socket, Type};
-use tokio::net::UdpSocket;
+use socket_pktinfo::AsyncPktInfoUdpSocket;
 
 use crate::mdns::{MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT};
 
 /// TTL (Time to Live) for mDNS records in seconds.
 const RECORD_TTL: u32 = 120;
 
-pub async fn setup_multicast_socket_v4() -> Result<UdpSocket, std::io::Error> {
-    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-    socket.set_reuse_address(true)?;
-    #[cfg(target_family = "unix")]
-    socket.set_reuse_port(true)?;
-    socket.set_multicast_loop_v4(true)?;
-    socket.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, MDNS_PORT).into())?;
-    socket.set_nonblocking(true)?;
-    let socket = UdpSocket::from_std(socket.into())?;
-    socket.join_multicast_v4(MDNS_IPV4_ADDR, Ipv4Addr::UNSPECIFIED)?;
-    Ok(socket)
-}
+pub async fn setup_multicast_socket() -> Result<[AsyncPktInfoUdpSocket; 2], std::io::Error> {
+    let socket_v4 = socket2::Socket::new(
+        socket2::Domain::IPV4,
+        socket2::Type::DGRAM,
+        Some(socket2::Protocol::UDP),
+    )?;
+    let socket_v6 = socket2::Socket::new(
+        socket2::Domain::IPV6,
+        socket2::Type::DGRAM,
+        Some(socket2::Protocol::UDP),
+    )?;
+    
+    for socket in [&socket_v4, &socket_v6] {
+        socket.set_reuse_address(true)?;
+        #[cfg(target_family = "unix")]
+        socket.set_reuse_port(true)?;
+    }
 
-pub async fn setup_multicast_socket_v6() -> Result<UdpSocket, std::io::Error> {
-    let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
-    socket.set_reuse_address(true)?;
-    #[cfg(target_family = "unix")]
-    socket.set_reuse_port(true)?;
-    socket.set_multicast_loop_v6(true)?;
-    socket.bind(&SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, MDNS_PORT, 0, 0).into())?;
-    socket.set_nonblocking(true)?;
-    let socket = UdpSocket::from_std(socket.into())?;
-    socket.join_multicast_v6(&MDNS_IPV6_ADDR, 0)?;
-    Ok(socket)
+    socket_v4.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, MDNS_PORT).into())?;
+    socket_v6.bind(&SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, MDNS_PORT, 0, 0).into())?;
+
+    let mut joined_ifindexes = HashSet::new();
+    for if_addr in if_addrs::get_if_addrs()? {
+        match if_addr.addr.clone() {
+            if_addrs::IfAddr::V4(ifv4) => {
+                socket_v4.join_multicast_v4(&MDNS_IPV4_ADDR, &ifv4.ip)?;
+                log::debug!(
+                    "Joined mDNS IPv4 multicast group on interface {} with address {}",
+                    if_addr.name,
+                    ifv4.ip
+                );
+            }
+            if_addrs::IfAddr::V6(_) => {
+                if let Some(if_index) = if_addr.index {
+                    if joined_ifindexes.insert(if_index) {
+                        socket_v6.join_multicast_v6(&MDNS_IPV6_ADDR, if_index)?;
+                        log::debug!(
+                            "Joined mDNS IPv6 multicast group on interface {} with index {}",
+                            if_addr.name,
+                            if_index
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    socket_v4.set_multicast_loop_v4(true)?;
+    socket_v6.set_multicast_loop_v6(true)?;
+
+    Ok([
+        AsyncPktInfoUdpSocket::from_std(socket_v4.into())?,
+        AsyncPktInfoUdpSocket::from_std(socket_v6.into())?,
+    ])
 }
 
 /// Sends byte data to the appropriate mDNS multicast address (IPv4 or IPv6)
@@ -51,7 +83,7 @@ pub async fn setup_multicast_socket_v6() -> Result<UdpSocket, std::io::Error> {
 ///
 /// # Returns
 /// A `Result` containing the number of bytes sent, or an `std::io::Error` if sending fails.
-pub async fn send_to_mdns(socket: &UdpSocket, bytes: &[u8]) -> Result<usize, std::io::Error> {
+pub async fn send_to_mdns(socket: &AsyncPktInfoUdpSocket, bytes: &[u8]) -> Result<usize, std::io::Error> {
     let local_addr = socket.local_addr()?; // Get the local address of the socket
 
     // Determine the mDNS multicast address based on the IP version of the local socket.

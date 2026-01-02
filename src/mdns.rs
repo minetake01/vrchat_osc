@@ -13,16 +13,17 @@ use hickory_proto::{
     rr::{Name, RecordType},
     serialize::binary::BinEncodable,
 };
+use socket_pktinfo::AsyncPktInfoUdpSocket;
 use task::server_task;
 use tokio::{
-    net::UdpSocket,
-    sync::{mpsc, RwLock},
-    task::JoinHandle,
+    sync::{RwLock, mpsc}, task::JoinHandle
 };
 use utils::{
-    create_mdns_response_message, send_to_mdns, setup_multicast_socket_v4,
-    setup_multicast_socket_v6,
+    create_mdns_response_message, send_to_mdns
 };
+
+use crate::mdns::utils::setup_multicast_socket;
+
 const MDNS_PORT: u16 = 5353;
 const MDNS_IPV4_ADDR: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
 const MDNS_IPV6_ADDR: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xFB);
@@ -38,16 +39,13 @@ pub enum Error {
     #[error("I/O Error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("Socket Binding Error: IPv4: {ipv4}, IPv6: {ipv6}")]
-    SocketBindError {
-        ipv4: std::io::Error,
-        ipv6: std::io::Error,
-    },
+    #[error("Failed to bind any sockets for mDNS.")]
+    AnySocketBindError,
 }
 
 /// Represents a task associated with a UDP socket for mDNS operations.
 struct MdnsTask {
-    socket: Arc<UdpSocket>,
+    socket: Arc<AsyncPktInfoUdpSocket>,
     handle: JoinHandle<()>,
 }
 
@@ -92,63 +90,28 @@ impl Mdns {
         let mut tasks = Vec::new();
 
         // Attempt to bind a UDP socket for multicast
-        let (socket_v4, socket_v6) = (
-            setup_multicast_socket_v4().await,
-            setup_multicast_socket_v6().await,
-        );
+        let sockets = setup_multicast_socket().await?;
 
-        if socket_v4.is_err() && socket_v6.is_err() {
-            log::error!("Failed to bind any multicast sockets for mDNS");
-            return Err(Error::SocketBindError {
-                ipv4: socket_v4.err().unwrap(),
-                ipv6: socket_v6.err().unwrap(),
+        for socket in sockets {
+            log::info!(
+                "Successfully bound to multicast socket: {:?}",
+                socket.local_addr()
+            );
+            let socket = Arc::new(socket);
+            tasks.push(MdnsTask {
+                socket: socket.clone(),
+                handle: tokio::spawn(server_task(
+                    socket,
+                    notifier_tx.clone(),
+                    registered_services.clone(),
+                    service_cache.clone(),
+                    follow_services.clone(),
+                )),
             });
         }
 
-        match socket_v4 {
-            Ok(socket) => {
-                log::info!(
-                    "Successfully bound to IPv4 multicast socket: {:?}",
-                    socket.local_addr()
-                );
-                let socket = Arc::new(socket);
-                tasks.push(MdnsTask {
-                    socket: socket.clone(),
-                    handle: tokio::spawn(server_task(
-                        socket,
-                        notifier_tx.clone(),
-                        registered_services.clone(),
-                        service_cache.clone(),
-                        follow_services.clone(),
-                    )),
-                });
-            }
-            Err(e) => {
-                log::warn!("Failed to bind IPv4 multicast socket: {}", e);
-            }
-        }
-
-        match socket_v6 {
-            Ok(socket) => {
-                log::info!(
-                    "Successfully bound to IPv6 multicast socket: {:?}",
-                    socket.local_addr()
-                );
-                let socket = Arc::new(socket);
-                tasks.push(MdnsTask {
-                    socket: socket.clone(),
-                    handle: tokio::spawn(server_task(
-                        socket,
-                        notifier_tx.clone(),
-                        registered_services.clone(),
-                        service_cache.clone(),
-                        follow_services.clone(),
-                    )),
-                });
-            }
-            Err(e) => {
-                log::warn!("Failed to bind IPv6 multicast socket: {}", e);
-            }
+        if tasks.is_empty() {
+            return Err(Error::AnySocketBindError);
         }
 
         Ok(Mdns {
