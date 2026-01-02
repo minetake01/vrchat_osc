@@ -210,13 +210,13 @@ impl VRChatOSC {
         self.mdns
             .register(
                 Name::from_ascii(format!("{}._osc._udp.local.", service_name_upper_camel))?,
-                osc_local_addr,
+                osc_local_addr.port(),
             )
             .await?;
         self.mdns
             .register(
                 Name::from_ascii(format!("{}._oscjson._tcp.local.", service_name_upper_camel))?,
-                osc_query_local_addr,
+                osc_query_local_addr.port(),
             )
             .await?;
 
