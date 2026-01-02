@@ -14,6 +14,8 @@ use tokio::{
     sync::{mpsc, RwLock},
 };
 
+use crate::mdns::MDNS_PORT;
+
 use super::utils::{create_mdns_response_message, extract_service_info};
 
 /// Size of the buffer used for receiving UDP packets. 4KB is a common size.

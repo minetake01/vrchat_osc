@@ -10,9 +10,8 @@ use hickory_proto::{
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
 
-const MDNS_PORT: u16 = 5353;
-const MDNS_IPV4_ADDR: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
-const MDNS_IPV6_ADDR: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xFB);
+use crate::mdns::{MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT};
+
 /// TTL (Time to Live) for mDNS records in seconds.
 const RECORD_TTL: u32 = 120;
 

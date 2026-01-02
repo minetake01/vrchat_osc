@@ -23,6 +23,9 @@ use utils::{
     create_mdns_response_message, send_to_mdns, setup_multicast_socket_v4,
     setup_multicast_socket_v6,
 };
+const MDNS_PORT: u16 = 5353;
+const MDNS_IPV4_ADDR: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
+const MDNS_IPV6_ADDR: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xFB);
 
 /// Maximum number of attempts to send a multicast message.
 const MAX_SEND_ATTEMPTS: usize = 3;
