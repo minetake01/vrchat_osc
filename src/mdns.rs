@@ -3,7 +3,7 @@ mod utils;
 
 use std::{
     collections::{HashMap, HashSet},
-    net::SocketAddr,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
