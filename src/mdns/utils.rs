@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6}, sync::Arc,
 };
 
 use hickory_proto::{
@@ -17,7 +17,7 @@ use crate::mdns::{MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT};
 /// TTL (Time to Live) for mDNS records in seconds.
 const RECORD_TTL: u32 = 120;
 
-pub async fn setup_multicast_socket() -> Result<[AsyncPktInfoUdpSocket; 2], std::io::Error> {
+pub async fn setup_multicast_socket(if_addrs: Vec<if_addrs::Interface>) -> Result<[Arc<AsyncPktInfoUdpSocket>; 2], std::io::Error> {
     let socket_v4 = socket2::Socket::new(
         socket2::Domain::IPV4,
         socket2::Type::DGRAM,
@@ -39,7 +39,7 @@ pub async fn setup_multicast_socket() -> Result<[AsyncPktInfoUdpSocket; 2], std:
     socket_v6.bind(&SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, MDNS_PORT, 0, 0).into())?;
 
     let mut joined_ifindexes = HashSet::new();
-    for if_addr in if_addrs::get_if_addrs()? {
+    for if_addr in if_addrs.iter() {
         match if_addr.addr.clone() {
             if_addrs::IfAddr::V4(ifv4) => {
                 socket_v4.join_multicast_v4(&MDNS_IPV4_ADDR, &ifv4.ip)?;
@@ -68,8 +68,8 @@ pub async fn setup_multicast_socket() -> Result<[AsyncPktInfoUdpSocket; 2], std:
     socket_v6.set_multicast_loop_v6(true)?;
 
     Ok([
-        AsyncPktInfoUdpSocket::from_std(socket_v4.into())?,
-        AsyncPktInfoUdpSocket::from_std(socket_v6.into())?,
+        Arc::new(AsyncPktInfoUdpSocket::from_std(socket_v4.into())?),
+        Arc::new(AsyncPktInfoUdpSocket::from_std(socket_v6.into())?),
     ])
 }
 

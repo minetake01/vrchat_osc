@@ -4,7 +4,7 @@ mod utils;
 
 use std::{
     collections::{HashMap, HashSet},
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
@@ -91,14 +91,44 @@ impl Mdns {
         let mut tasks = Vec::new();
 
         // Attempt to bind a UDP socket for multicast
-        let sockets = setup_multicast_socket().await?;
+		let if_monitor = if_monitor::IfMonitor::new()?;
+		let if_addrs = if_monitor.get_interfaces().await;
+        let sockets = setup_multicast_socket(if_addrs).await?;
+
+		let sockets_clone = sockets.clone();
+		if_monitor.on_added(move |ifes| {
+            match ifes.ip() {
+                IpAddr::V4(ip) => {
+                    sockets_clone[0].join_multicast_v4(&MDNS_IPV4_ADDR, &ip).ok();
+                }
+                IpAddr::V6(_) => {
+                    let Some(if_index) = ifes.index else {
+                        return;
+                    };
+                    sockets_clone[1].join_multicast_v6(&MDNS_IPV6_ADDR, if_index).ok();
+                }
+            }
+		});
+        let sockets_clone = sockets.clone();
+        if_monitor.on_removed(move |ifes| {
+            match ifes.ip() {
+                IpAddr::V4(ip) => {
+                    sockets_clone[0].leave_multicast_v4(&MDNS_IPV4_ADDR, &ip).ok();
+                }
+                IpAddr::V6(_) => {
+                    let Some(if_index) = ifes.index else {
+                        return;
+                    };
+                    sockets_clone[1].leave_multicast_v6(&MDNS_IPV6_ADDR, if_index).ok();
+                }
+            }
+        });
 
         for socket in sockets {
             log::info!(
                 "Successfully bound to multicast socket: {:?}",
                 socket.local_addr()
             );
-            let socket = Arc::new(socket);
             tasks.push(MdnsTask {
                 socket: socket.clone(),
                 handle: tokio::spawn(server_task(
