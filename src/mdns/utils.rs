@@ -12,7 +12,7 @@ use hickory_proto::{
 };
 use socket_pktinfo::AsyncPktInfoUdpSocket;
 
-use crate::mdns::{MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT};
+use crate::mdns::{MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT, if_monitor::IfMonitor};
 
 /// TTL (Time to Live) for mDNS records in seconds.
 const RECORD_TTL: u32 = 120;
@@ -83,16 +83,57 @@ pub async fn setup_multicast_socket(if_addrs: Vec<if_addrs::Interface>) -> Resul
 ///
 /// # Returns
 /// A `Result` containing the number of bytes sent, or an `std::io::Error` if sending fails.
-pub async fn send_to_mdns(socket: &AsyncPktInfoUdpSocket, bytes: &[u8]) -> Result<usize, std::io::Error> {
-    let local_addr = socket.local_addr()?; // Get the local address of the socket
+pub async fn send_to_mdns(
+    socket: &AsyncPktInfoUdpSocket,
+    bytes: &[u8],
+    if_monitor: &IfMonitor,
+) -> Result<usize, std::io::Error> {
+    // Send mDNS on all interfaces for the socket's IP family
+    let local_addr = socket.local_addr()?;
+    let ifs = if_monitor.get_interfaces().await;
 
-    // Determine the mDNS multicast address based on the IP version of the local socket.
+    let mut total_sent: usize = 0;
+
     if local_addr.is_ipv4() {
-        socket.send_to(bytes, (MDNS_IPV4_ADDR, MDNS_PORT)).await
+        // Iterate all IPv4 interfaces and send via each
+        for if_addr in ifs.into_iter() {
+            if let if_addrs::IfAddr::V4(v4) = if_addr.addr {
+                if let Err(e) = socket.set_multicast_if_v4(&v4.ip) {
+                    log::error!("Failed to set multicast IPv4 interface {}: {}", v4.ip, e);
+                    continue;
+                }
+                match socket.send_to(bytes, (MDNS_IPV4_ADDR, MDNS_PORT)).await {
+                    Ok(n) => { total_sent = total_sent.saturating_add(n); },
+                    Err(e) => {
+                        log::error!("Failed to send mDNS IPv4 packet on interface {}: {}", v4.ip, e);
+                    }
+                }
+            }
+        }
+        Ok(total_sent)
     } else if local_addr.is_ipv6() {
-        socket.send_to(bytes, (MDNS_IPV6_ADDR, MDNS_PORT)).await
+        // Iterate all IPv6 interfaces and send via each
+        let mut used_indexes = std::collections::HashSet::new();
+        for if_addr in ifs.into_iter() {
+            if let if_addrs::IfAddr::V6(_v6) = if_addr.addr {
+                if let Some(idx) = if_addr.index {
+                    if used_indexes.insert(idx) {
+                        if let Err(e) = socket.set_multicast_if_v6(idx) {
+                            log::error!("Failed to set multicast IPv6 interface index {}: {}", idx, e);
+                            continue;
+                        }
+                        match socket.send_to(bytes, (MDNS_IPV6_ADDR, MDNS_PORT)).await {
+                            Ok(n) => { total_sent = total_sent.saturating_add(n); },
+                            Err(e) => {
+                                log::error!("Failed to send mDNS IPv6 packet on if_index {}: {}", idx, e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(total_sent)
     } else {
-        // This case should ideally not be reached if sockets are bound correctly to IPv4 or IPv6.
         Err(std::io::Error::new(
             std::io::ErrorKind::AddrNotAvailable,
             "Socket local address is neither IPv4 nor IPv6",
