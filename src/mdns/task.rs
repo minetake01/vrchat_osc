@@ -214,11 +214,7 @@ async fn handle_query(
                         query_name_str,
                         port
                     );
-					let Ok(socket_local_addr) = socket.local_addr() else {
-						log::error!("Failed to get local address of socket for responding to query.");
-						continue;
-					};
-                    let response_message = create_mdns_response_message(query.name(), socket_local_addr.ip(), port); // Use query.name() as it's the instance name
+                    let response_message = create_mdns_response_message(query.name(), pkt_info.addr_dst, port); // Use query.name() as it's the instance name
 					let bytes = response_message.to_bytes();
                     match bytes {
                         Ok(bytes) => {
