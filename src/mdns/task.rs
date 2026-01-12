@@ -34,6 +34,7 @@ const BUFFER_SIZE: usize = 4096;
 ///   discovered services from responses.
 /// * `follow_services` - An `Arc<RwLock<...>>` containing the set of service types this
 ///   instance is actively interested in.
+/// * `if_monitor` - An `Arc<IfMonitor>` to monitor network interface changes.
 pub async fn server_task(
     socket: Arc<AsyncPktInfoUdpSocket>,
     notifier_tx: mpsc::Sender<(Name, SocketAddr)>,
@@ -125,7 +126,8 @@ pub async fn server_task(
 /// * `query_message` - The parsed `Message` object representing the mDNS query.
 /// * `socket` - The `AsyncPktInfoUdpSocket` to send responses from.
 /// * `registered_services` - Read-only access to the map of locally registered services.
-/// * `src_addr` - The address of the client that sent the query.
+/// * `pkt_info` - Packet information including destination address and interface index.
+/// * `if_monitor` - An `Arc<IfMonitor>` to monitor network interface changes.
 async fn handle_query(
     query_message: Message,
     socket: &AsyncPktInfoUdpSocket,
@@ -253,6 +255,7 @@ async fn handle_query(
 /// # Arguments
 /// * `response_message` - The parsed `Message` object representing the mDNS response.
 /// * `notifier_tx` - The sender channel to notify about newly discovered/updated services.
+/// * `registered_services` - Read-only access to the map of locally registered services.
 /// * `service_cache` - Writable access to the cache of discovered services.
 /// * `follow_services` - Read-only access to the set of service types being followed.
 async fn handle_response(

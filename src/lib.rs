@@ -65,7 +65,6 @@ pub struct VRChatOSC {
     /// Stores registered service handles, mapping service name to its handle.
     service_handles: Arc<RwLock<HashMap<String, ServiceHandle>>>,
     /// Callback function to be executed when a new mDNS service is discovered.
-    /// The Name is the service instance name, and SocketAddr is its resolved address.
     on_service_discovered_callback:
         Arc<RwLock<Option<Arc<dyn Fn(ServiceType) + Send + Sync + 'static>>>>,
 }

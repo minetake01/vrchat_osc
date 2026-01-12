@@ -17,6 +17,17 @@ use crate::mdns::{MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT, if_monitor::IfMonit
 /// TTL (Time to Live) for mDNS records in seconds.
 const RECORD_TTL: u32 = 120;
 
+/// Sets up IPv4 and IPv6 multicast sockets for mDNS.
+///
+/// This function creates UDP sockets, configures them for address reuse,
+/// binds them to the mDNS port on wildcard addresses, and joins the
+/// mDNS multicast groups on all provided network interfaces.
+///
+/// # Arguments
+/// * `if_addrs` - A vector of network interfaces to join multicast groups on.
+///
+/// # Returns
+/// A `Result` containing an array of two `Arc<AsyncPktInfoUdpSocket>`s (IPv4 and IPv6) if successful.
 pub async fn setup_multicast_socket(if_addrs: Vec<if_addrs::Interface>) -> Result<[Arc<AsyncPktInfoUdpSocket>; 2], std::io::Error> {
     let socket_v4 = socket2::Socket::new(
         socket2::Domain::IPV4,
@@ -74,15 +85,16 @@ pub async fn setup_multicast_socket(if_addrs: Vec<if_addrs::Interface>) -> Resul
 }
 
 /// Sends byte data to the appropriate mDNS multicast address (IPv4 or IPv6)
-/// based on the local address of the provided UDP socket.
+/// across all available network interfaces for the socket's family.
 ///
 /// # Arguments
-/// * `socket` - An `Arc<UdpSocket>` used for sending the data. The socket's local address
-///   determines whether to use the IPv4 or IPv6 mDNS multicast address.
+/// * `socket` - An `AsyncPktInfoUdpSocket` used for sending the data. The socket's family
+///   determines whether to use the IPv4 or IPv6 mDNS multicast address.
 /// * `bytes` - A slice of bytes representing the mDNS message to send.
+/// * `if_monitor` - An `IfMonitor` instance to get current network interfaces.
 ///
 /// # Returns
-/// A `Result` containing the number of bytes sent, or an `std::io::Error` if sending fails.
+/// A `Result` containing the total number of bytes sent, or an `std::io::Error` if sending fails.
 pub async fn send_to_mdns(
     socket: &AsyncPktInfoUdpSocket,
     bytes: &[u8],
@@ -151,7 +163,8 @@ pub async fn send_to_mdns(
 ///
 /// # Arguments
 /// * `instance_name` - The fully qualified name of the service instance (e.g., `MyInstance._myservice._tcp.local.`).
-/// * `addr` - The `SocketAddr` (IP address and port) where the service instance is hosted.
+/// * `socket_ip` - The `IpAddr` to be included in the A/AAAA records.
+/// * `port` - The port number where the service instance is hosted.
 ///
 /// # Returns
 /// An mDNS `Message` configured as a response, ready to be serialized and sent.

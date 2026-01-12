@@ -7,14 +7,20 @@ use std::time::Duration;
 use if_addrs::Interface;
 use tokio::sync::RwLock;
 
+/// Monitors network interface changes and provides a way to react to them.
 pub struct IfMonitor {
+    /// List of currently available network interfaces.
     interfaces: Arc<RwLock<Vec<Interface>>>,
+    /// Callback to be executed when a new interface is added.
 	on_added: Arc<Mutex<Option<Box<dyn Fn(Interface) + Send + 'static>>>>,
+    /// Callback to be executed when an interface is removed.
 	on_removed: Arc<Mutex<Option<Box<dyn Fn(Interface) + Send + 'static>>>>,
+    /// Flag to signal the background monitoring thread to stop.
     shutdown: Arc<AtomicBool>,
 }
 
 impl IfMonitor {
+    /// Creates a new `IfMonitor` instance and starts a background thread to watch for interface changes.
     pub fn new() -> std::io::Result<Self> {
         let interfaces = Arc::new(RwLock::new(if_addrs::get_if_addrs()?));
 
@@ -86,6 +92,7 @@ impl IfMonitor {
         interfaces.clone()
     }
 
+    /// Registers a callback for when a new interface is added.
 	pub fn on_added<F>(&self, callback: F)
 	where
 		F: Fn(Interface) + Send + 'static,
@@ -95,6 +102,7 @@ impl IfMonitor {
 		}
 	}
 
+    /// Registers a callback for when an interface is removed.
 	pub fn on_removed<F>(&self, callback: F)
 	where
 		F: Fn(Interface) + Send + 'static,
