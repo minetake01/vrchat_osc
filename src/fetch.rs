@@ -52,8 +52,8 @@ where
     // If this task is not spawned, the `sender.send_request` call might hang.
     tokio::spawn(async move {
         if let Err(err) = conn.await {
-            // Log an error if the connection encounters an issue.
-            log::error!("HTTP connection failed: {}", err);
+            // Background connection errors are reported to the caller via the returned Result.
+            log::warn!("HTTP connection failed: {}", err);
         }
     });
 

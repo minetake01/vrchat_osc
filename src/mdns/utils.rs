@@ -99,13 +99,13 @@ pub async fn send_to_mdns(
         for if_addr in ifs.into_iter() {
             if let if_addrs::IfAddr::V4(v4) = if_addr.addr {
                 if let Err(e) = socket.set_multicast_if_v4(&v4.ip) {
-                    log::error!("Failed to set multicast IPv4 interface {}: {}", v4.ip, e);
+                    log::warn!("Failed to set multicast IPv4 interface {}: {}", v4.ip, e);
                     continue;
                 }
                 match socket.send_to(bytes, (MDNS_IPV4_ADDR, MDNS_PORT)).await {
                     Ok(n) => { total_sent = total_sent.saturating_add(n); },
                     Err(e) => {
-                        log::error!("Failed to send mDNS IPv4 packet on interface {}: {}", v4.ip, e);
+                        log::warn!("Failed to send mDNS IPv4 packet on interface {}: {}", v4.ip, e);
                     }
                 }
             }
@@ -119,13 +119,13 @@ pub async fn send_to_mdns(
                 if let Some(idx) = if_addr.index {
                     if used_indexes.insert(idx) {
                         if let Err(e) = socket.set_multicast_if_v6(idx) {
-                            log::error!("Failed to set multicast IPv6 interface index {}: {}", idx, e);
+                            log::warn!("Failed to set multicast IPv6 interface index {}: {}", idx, e);
                             continue;
                         }
                         match socket.send_to(bytes, (MDNS_IPV6_ADDR, MDNS_PORT)).await {
                             Ok(n) => { total_sent = total_sent.saturating_add(n); },
                             Err(e) => {
-                                log::error!("Failed to send mDNS IPv6 packet on if_index {}: {}", idx, e);
+                                log::warn!("Failed to send mDNS IPv6 packet on if_index {}: {}", idx, e);
                             }
                         }
                     }
@@ -291,7 +291,7 @@ pub fn extract_service_info(message: &Message) -> Option<(Name, SocketAddr)> {
         ip_owner_name.clone(),
     ) {
         if srv_owner == instance_name && ip_owner == srv_target {
-            log::debug!(
+            log::trace!(
                 "Successfully extracted service info: Name='{}', IP='{}', Port='{}'",
                 instance_name,
                 ip_addr_val,

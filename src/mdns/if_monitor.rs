@@ -43,7 +43,7 @@ impl IfMonitor {
                     for detail in details {
                         match detail {
                             if_addrs::IfChangeType::Added(iface) => {
-                                log::info!("Interface added: {:?}", iface);
+                                log::debug!("Interface added: {:?}", iface);
 								// Call the on_added callback if it exists
 								if let Ok(callback_guard) = on_added_clone.lock() {
 									if let Some(callback) = callback_guard.as_ref() {
@@ -57,7 +57,7 @@ impl IfMonitor {
                                 }
                             }
                             if_addrs::IfChangeType::Removed(iface) => {
-                                log::info!("Interface removed: {:?}", iface);
+                                log::debug!("Interface removed: {:?}", iface);
 								// Call the on_removed callback if it exists
 								if let Ok(callback_guard) = on_removed_clone.lock() {
 									if let Some(callback) = callback_guard.as_ref() {

@@ -130,7 +130,7 @@ impl Mdns {
         });
 
         for socket in sockets {
-            log::info!(
+            log::debug!(
                 "Successfully bound to multicast socket: {:?}",
                 socket.local_addr()
             );
@@ -225,7 +225,7 @@ impl Mdns {
                 removed = true;
                 if instances.is_empty() {
                     services_guard.remove(&base_service_name);
-                    log::info!(
+                    log::debug!(
                         "Removed service type from registry as no instances remain: {}",
                         base_service_name
                     );
@@ -259,7 +259,7 @@ impl Mdns {
             }
         }
 
-        log::info!("Now following service type: {}", service_type_name);
+        log::debug!("Now following service type: {}", service_type_name);
 
         let mut query_message = Message::new();
         query_message.add_query(Query::query(service_type_name.clone(), RecordType::ANY));
@@ -285,7 +285,7 @@ impl Mdns {
     pub async fn unfollow(&self, service_type_name: Name) {
         let mut follow_guard = self.follow_services.write().await;
         if follow_guard.remove(&service_type_name) {
-            log::info!("Stopped following service type: {}", service_type_name);
+            log::debug!("Stopped following service type: {}", service_type_name);
         } else {
             log::debug!(
                 "Attempted to unfollow a service type not being followed: {}",
@@ -334,6 +334,6 @@ impl Drop for Mdns {
         for task in &mut self.tasks {
             task.handle.abort();
         }
-        log::info!("All mDNS tasks have been cleaned up.");
+        log::debug!("All mDNS tasks have been cleaned up.");
     }
 }

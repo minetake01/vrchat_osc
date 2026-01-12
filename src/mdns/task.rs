@@ -135,7 +135,7 @@ async fn handle_query(
 ) {
     // Iterate over each query in the mDNS message.
     for query in query_message.queries() {
-        log::debug!(
+        log::trace!(
             "Received mDNS query for service name: {}, type: {:?}, class: {:?}",
             query.name(),
             query.query_type(),
@@ -155,7 +155,7 @@ async fn handle_query(
             // `query.name()` is the service type, e.g. `_oscjson._tcp.local.`
             if let Some(instances_map) = services_guard.get(query.name()) {
                 for (instance_name, &port) in instances_map.iter() {
-                    log::info!(
+                    log::debug!(
                         "Responding to PTR/ANY query for service type {} with instance: {} at {}",
                         query_name_str,
                         instance_name,
@@ -207,7 +207,7 @@ async fn handle_query(
             if let Some(instances_map) = services_guard.get(&service_type_key) {
                 // Now check if the specific instance `query.name()` is in this map.
                 if let Some(&addr) = instances_map.get(query.name()) {
-                    log::info!(
+                    log::debug!(
                         "Responding to specific query for registered service instance: {} at {}",
                         query_name_str,
                         addr
@@ -268,7 +268,7 @@ async fn handle_response(
     if let Some((discovered_instance_name, discovered_addr)) =
         extract_service_info(&response_message)
     {
-        log::debug!(
+        log::trace!(
             "Potential service discovered in response: {} at {}",
             discovered_instance_name,
             discovered_addr
@@ -298,7 +298,7 @@ async fn handle_response(
 
             if old_value.map_or(true, |old_addr| old_addr != discovered_addr) {
                 // If it's a new service or its address changed.
-                log::info!(
+                log::debug!(
                     "Service cache updated for: {} at {} (was {:?})",
                     discovered_instance_name,
                     discovered_addr,
@@ -315,14 +315,9 @@ async fn handle_response(
                         discovered_instance_name,
                         e
                     );
-                } else {
-                    log::debug!(
-                        "Sent notification for service: {}",
-                        discovered_instance_name
-                    );
                 }
             } else {
-                log::debug!(
+                log::trace!(
                     "Service cache already up-to-date for: {} at {}",
                     discovered_instance_name,
                     discovered_addr

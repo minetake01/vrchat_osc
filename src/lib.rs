@@ -168,7 +168,7 @@ impl VRChatOSC {
                         if let Ok((_, packet)) = rosc::decoder::decode_udp(&buf[..len]) {
                             handler(packet); // Call the provided handler with the decoded packet.
                         } else {
-                            log::warn!("Failed to decode OSC packet from {}", addr);
+                            log::debug!("Failed to decode OSC packet from {}", addr);
                         }
                     }
                     Err(e) => {
@@ -178,8 +178,8 @@ impl VRChatOSC {
                             log::warn!("Socket connection error ({}). Task for {:?} might need to be restarted or interface is down.", e, socket.local_addr().ok());
                             break;
                         } else {
-                            log::error!(
-                                "Failed to receive data on mDNS socket {:?}: {}",
+                            log::warn!(
+                                "Failed to receive data on OSC socket {:?}: {}",
                                 socket.local_addr().ok(),
                                 e
                             );
@@ -281,7 +281,7 @@ impl VRChatOSC {
             .await;
 
         if services.is_empty() {
-            log::warn!("No mDNS services found matching the expression: {}", to);
+            log::info!("No mDNS services found matching the expression: {}", to);
             return Ok(());
         }
 
@@ -335,7 +335,7 @@ impl VRChatOSC {
             .await;
 
         if services.is_empty() {
-            log::warn!(
+            log::info!(
                 "No mDNS services found for get_parameter matching expression: {}",
                 from
             );
