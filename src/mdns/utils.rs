@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6}, sync::Arc,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    sync::Arc,
 };
 
 use hickory_proto::{
@@ -13,7 +14,7 @@ use hickory_proto::{
 };
 use socket_pktinfo::AsyncPktInfoUdpSocket;
 
-use crate::mdns::{MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT, if_monitor::IfMonitor};
+use crate::mdns::{if_monitor::IfMonitor, MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT};
 
 /// TTL (Time to Live) for mDNS records in seconds.
 const RECORD_TTL: u32 = 120;
@@ -29,7 +30,9 @@ const RECORD_TTL: u32 = 120;
 ///
 /// # Returns
 /// A `Result` containing an array of two `Arc<AsyncPktInfoUdpSocket>`s (IPv4 and IPv6) if successful.
-pub async fn setup_multicast_socket(if_addrs: Vec<if_addrs::Interface>) -> Result<[Arc<AsyncPktInfoUdpSocket>; 2], std::io::Error> {
+pub async fn setup_multicast_socket(
+    if_addrs: Vec<if_addrs::Interface>,
+) -> Result<[Arc<AsyncPktInfoUdpSocket>; 2], std::io::Error> {
     let socket_v4 = socket2::Socket::new(
         socket2::Domain::IPV4,
         socket2::Type::DGRAM,
@@ -40,7 +43,7 @@ pub async fn setup_multicast_socket(if_addrs: Vec<if_addrs::Interface>) -> Resul
         socket2::Type::DGRAM,
         Some(socket2::Protocol::UDP),
     )?;
-    
+
     for socket in [&socket_v4, &socket_v6] {
         socket.set_reuse_address(true)?;
         #[cfg(target_family = "unix")]
@@ -111,17 +114,24 @@ pub async fn send_mdns_announcement(
     if local_addr.is_ipv4() {
         for if_addr in ifs.iter() {
             if let if_addrs::IfAddr::V4(ref v4) = if_addr.addr {
-                let response_message = create_mdns_response_message(instance_name, IpAddr::V4(v4.ip), port);
+                let response_message =
+                    create_mdns_response_message(instance_name, IpAddr::V4(v4.ip), port);
                 let bytes = response_message.to_bytes()?;
-                
+
                 if let Err(e) = socket.set_multicast_if_v4(&v4.ip) {
                     log::warn!("Failed to set multicast IPv4 interface {}: {}", v4.ip, e);
                     continue;
                 }
                 match socket.send_to(&bytes, (MDNS_IPV4_ADDR, MDNS_PORT)).await {
-                    Ok(n) => { total_sent = total_sent.saturating_add(n); },
+                    Ok(n) => {
+                        total_sent = total_sent.saturating_add(n);
+                    }
                     Err(e) => {
-                        log::warn!("Failed to send mDNS IPv4 announcement on interface {}: {}", v4.ip, e);
+                        log::warn!(
+                            "Failed to send mDNS IPv4 announcement on interface {}: {}",
+                            v4.ip,
+                            e
+                        );
                     }
                 }
             }
@@ -132,17 +142,28 @@ pub async fn send_mdns_announcement(
             if let if_addrs::IfAddr::V6(ref v6) = if_addr.addr {
                 if let Some(idx) = if_addr.index {
                     if used_indexes.insert(idx) {
-                        let response_message = create_mdns_response_message(instance_name, IpAddr::V6(v6.ip), port);
+                        let response_message =
+                            create_mdns_response_message(instance_name, IpAddr::V6(v6.ip), port);
                         let bytes = response_message.to_bytes()?;
-                        
+
                         if let Err(e) = socket.set_multicast_if_v6(idx) {
-                            log::warn!("Failed to set multicast IPv6 interface index {}: {}", idx, e);
+                            log::warn!(
+                                "Failed to set multicast IPv6 interface index {}: {}",
+                                idx,
+                                e
+                            );
                             continue;
                         }
                         match socket.send_to(&bytes, (MDNS_IPV6_ADDR, MDNS_PORT)).await {
-                            Ok(n) => { total_sent = total_sent.saturating_add(n); },
+                            Ok(n) => {
+                                total_sent = total_sent.saturating_add(n);
+                            }
                             Err(e) => {
-                                log::warn!("Failed to send mDNS IPv6 announcement on if_index {}: {}", idx, e);
+                                log::warn!(
+                                    "Failed to send mDNS IPv6 announcement on if_index {}: {}",
+                                    idx,
+                                    e
+                                );
                             }
                         }
                     }
@@ -184,9 +205,15 @@ pub async fn send_to_mdns(
                     continue;
                 }
                 match socket.send_to(bytes, (MDNS_IPV4_ADDR, MDNS_PORT)).await {
-                    Ok(n) => { total_sent = total_sent.saturating_add(n); },
+                    Ok(n) => {
+                        total_sent = total_sent.saturating_add(n);
+                    }
                     Err(e) => {
-                        log::warn!("Failed to send mDNS IPv4 packet on interface {}: {}", v4.ip, e);
+                        log::warn!(
+                            "Failed to send mDNS IPv4 packet on interface {}: {}",
+                            v4.ip,
+                            e
+                        );
                     }
                 }
             }
@@ -200,13 +227,23 @@ pub async fn send_to_mdns(
                 if let Some(idx) = if_addr.index {
                     if used_indexes.insert(idx) {
                         if let Err(e) = socket.set_multicast_if_v6(idx) {
-                            log::warn!("Failed to set multicast IPv6 interface index {}: {}", idx, e);
+                            log::warn!(
+                                "Failed to set multicast IPv6 interface index {}: {}",
+                                idx,
+                                e
+                            );
                             continue;
                         }
                         match socket.send_to(bytes, (MDNS_IPV6_ADDR, MDNS_PORT)).await {
-                            Ok(n) => { total_sent = total_sent.saturating_add(n); },
+                            Ok(n) => {
+                                total_sent = total_sent.saturating_add(n);
+                            }
                             Err(e) => {
-                                log::warn!("Failed to send mDNS IPv6 packet on if_index {}: {}", idx, e);
+                                log::warn!(
+                                    "Failed to send mDNS IPv6 packet on if_index {}: {}",
+                                    idx,
+                                    e
+                                );
                             }
                         }
                     }

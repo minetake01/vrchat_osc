@@ -1,5 +1,5 @@
-mod task;
 mod if_monitor;
+mod task;
 mod utils;
 
 use std::{
@@ -17,11 +17,10 @@ use hickory_proto::{
 use socket_pktinfo::AsyncPktInfoUdpSocket;
 use task::server_task;
 use tokio::{
-    sync::{RwLock, mpsc}, task::JoinHandle
+    sync::{mpsc, RwLock},
+    task::JoinHandle,
 };
-use utils::{
-    send_mdns_announcement, send_to_mdns
-};
+use utils::{send_mdns_announcement, send_to_mdns};
 
 use crate::mdns::utils::setup_multicast_socket;
 
@@ -94,38 +93,42 @@ impl Mdns {
         let mut tasks = Vec::new();
 
         // Attempt to bind a UDP socket for multicast
-		let if_monitor = if_monitor::IfMonitor::new()?;
-		let if_addrs = if_monitor.get_interfaces().await;
+        let if_monitor = if_monitor::IfMonitor::new()?;
+        let if_addrs = if_monitor.get_interfaces().await;
         let sockets = setup_multicast_socket(if_addrs).await?;
 
-		let if_monitor = Arc::new(if_monitor);
+        let if_monitor = Arc::new(if_monitor);
 
-		let sockets_clone = sockets.clone();
-		if_monitor.on_added(move |ifes| {
-            match ifes.ip() {
-                IpAddr::V4(ip) => {
-                    sockets_clone[0].join_multicast_v4(&MDNS_IPV4_ADDR, &ip).ok();
-                }
-                IpAddr::V6(_) => {
-                    let Some(if_index) = ifes.index else {
-                        return;
-                    };
-                    sockets_clone[1].join_multicast_v6(&MDNS_IPV6_ADDR, if_index).ok();
-                }
-            }
-		});
         let sockets_clone = sockets.clone();
-        if_monitor.on_removed(move |ifes| {
-            match ifes.ip() {
-                IpAddr::V4(ip) => {
-                    sockets_clone[0].leave_multicast_v4(&MDNS_IPV4_ADDR, &ip).ok();
-                }
-                IpAddr::V6(_) => {
-                    let Some(if_index) = ifes.index else {
-                        return;
-                    };
-                    sockets_clone[1].leave_multicast_v6(&MDNS_IPV6_ADDR, if_index).ok();
-                }
+        if_monitor.on_added(move |ifes| match ifes.ip() {
+            IpAddr::V4(ip) => {
+                sockets_clone[0]
+                    .join_multicast_v4(&MDNS_IPV4_ADDR, &ip)
+                    .ok();
+            }
+            IpAddr::V6(_) => {
+                let Some(if_index) = ifes.index else {
+                    return;
+                };
+                sockets_clone[1]
+                    .join_multicast_v6(&MDNS_IPV6_ADDR, if_index)
+                    .ok();
+            }
+        });
+        let sockets_clone = sockets.clone();
+        if_monitor.on_removed(move |ifes| match ifes.ip() {
+            IpAddr::V4(ip) => {
+                sockets_clone[0]
+                    .leave_multicast_v4(&MDNS_IPV4_ADDR, &ip)
+                    .ok();
+            }
+            IpAddr::V6(_) => {
+                let Some(if_index) = ifes.index else {
+                    return;
+                };
+                sockets_clone[1]
+                    .leave_multicast_v6(&MDNS_IPV6_ADDR, if_index)
+                    .ok();
             }
         });
 
@@ -185,7 +188,10 @@ impl Mdns {
 
         for _ in 0..MAX_SEND_ATTEMPTS {
             for task in &self.tasks {
-                if let Err(e) = send_mdns_announcement(&task.socket, &instance_name, port, &self.if_monitor).await {
+                if let Err(e) =
+                    send_mdns_announcement(&task.socket, &instance_name, port, &self.if_monitor)
+                        .await
+                {
                     log::error!(
                         "Failed to send registration announcement for {} via {:?}: {}",
                         instance_name,

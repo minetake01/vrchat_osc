@@ -5,7 +5,9 @@ use std::{
 };
 
 use hickory_proto::{
-    op::{Message, MessageType, ResponseCode}, rr::{Name, RecordType}, serialize::binary::{BinDecodable, BinEncodable}
+    op::{Message, MessageType, ResponseCode},
+    rr::{Name, RecordType},
+    serialize::binary::{BinDecodable, BinEncodable},
 };
 use socket_pktinfo::{AsyncPktInfoUdpSocket, PktInfo};
 use tokio::sync::{mpsc, RwLock};
@@ -99,7 +101,14 @@ pub async fn server_task(
         match message.message_type() {
             MessageType::Query => {
                 // Handle incoming mDNS queries.
-                handle_query(message, &socket, &registered_services, &pkt_info, &if_monitor).await;
+                handle_query(
+                    message,
+                    &socket,
+                    &registered_services,
+                    &pkt_info,
+                    &if_monitor,
+                )
+                .await;
             }
             MessageType::Response => {
                 // Handle incoming mDNS responses.
@@ -163,8 +172,9 @@ async fn handle_query(
                         instance_name,
                         port
                     );
-                    let response_message = create_mdns_response_message(instance_name, pkt_info.addr_dst, port);
-					let bytes = response_message.to_bytes();
+                    let response_message =
+                        create_mdns_response_message(instance_name, pkt_info.addr_dst, port);
+                    let bytes = response_message.to_bytes();
                     match bytes {
                         Ok(bytes) => {
                             // mDNS unicast response handling
@@ -209,14 +219,20 @@ async fn handle_query(
             if let Some(instances_map) = services_guard.get(&service_type_key) {
                 // Now check if the specific instance `query.name()` is in this map.
                 // Use get_key_value to retrieve the actual registered instance name (not the queried name).
-                if let Some((registered_instance_name, &port)) = instances_map.get_key_value(query.name()) {
+                if let Some((registered_instance_name, &port)) =
+                    instances_map.get_key_value(query.name())
+                {
                     log::debug!(
                         "Responding to specific query for registered service instance: {} at {}",
                         registered_instance_name,
                         port
                     );
-                    let response_message = create_mdns_response_message(registered_instance_name, pkt_info.addr_dst, port);
-					let bytes = response_message.to_bytes();
+                    let response_message = create_mdns_response_message(
+                        registered_instance_name,
+                        pkt_info.addr_dst,
+                        port,
+                    );
+                    let bytes = response_message.to_bytes();
                     match bytes {
                         Ok(bytes) => {
                             // Send as unicast response to the querier

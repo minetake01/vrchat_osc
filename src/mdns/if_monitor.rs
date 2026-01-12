@@ -12,9 +12,9 @@ pub struct IfMonitor {
     /// List of currently available network interfaces.
     interfaces: Arc<RwLock<Vec<Interface>>>,
     /// Callback to be executed when a new interface is added.
-	on_added: Arc<Mutex<Option<Box<dyn Fn(Interface) + Send + 'static>>>>,
+    on_added: Arc<Mutex<Option<Box<dyn Fn(Interface) + Send + 'static>>>>,
     /// Callback to be executed when an interface is removed.
-	on_removed: Arc<Mutex<Option<Box<dyn Fn(Interface) + Send + 'static>>>>,
+    on_removed: Arc<Mutex<Option<Box<dyn Fn(Interface) + Send + 'static>>>>,
     /// Flag to signal the background monitoring thread to stop.
     shutdown: Arc<AtomicBool>,
 }
@@ -24,15 +24,17 @@ impl IfMonitor {
     pub fn new() -> std::io::Result<Self> {
         let interfaces = Arc::new(RwLock::new(if_addrs::get_if_addrs()?));
 
-        let on_added: Arc<Mutex<Option<Box<dyn Fn(Interface) + Send + 'static>>>> = Arc::new(Mutex::new(None));
-        let on_removed: Arc<Mutex<Option<Box<dyn Fn(Interface) + Send + 'static>>>> = Arc::new(Mutex::new(None));
+        let on_added: Arc<Mutex<Option<Box<dyn Fn(Interface) + Send + 'static>>>> =
+            Arc::new(Mutex::new(None));
+        let on_removed: Arc<Mutex<Option<Box<dyn Fn(Interface) + Send + 'static>>>> =
+            Arc::new(Mutex::new(None));
 
         let interfaces_clone = interfaces.clone();
         let on_added_clone = on_added.clone();
         let on_removed_clone = on_removed.clone();
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = shutdown.clone();
-        
+
         std::thread::spawn(move || {
             let Ok(mut notifier) = if_addrs::IfChangeNotifier::new() else {
                 log::error!("Failed to initialize interface change notifier.");
@@ -50,13 +52,13 @@ impl IfMonitor {
                         match detail {
                             if_addrs::IfChangeType::Added(iface) => {
                                 log::debug!("Interface added: {:?}", iface);
-								// Call the on_added callback if it exists
-								if let Ok(callback_guard) = on_added_clone.lock() {
-									if let Some(callback) = callback_guard.as_ref() {
-										callback(iface.clone());
-									}
-								}
-								// Update the interfaces list
+                                // Call the on_added callback if it exists
+                                if let Ok(callback_guard) = on_added_clone.lock() {
+                                    if let Some(callback) = callback_guard.as_ref() {
+                                        callback(iface.clone());
+                                    }
+                                }
+                                // Update the interfaces list
                                 let mut interfaces = interfaces_clone.blocking_write();
                                 if !interfaces.contains(&iface) {
                                     interfaces.push(iface);
@@ -64,12 +66,12 @@ impl IfMonitor {
                             }
                             if_addrs::IfChangeType::Removed(iface) => {
                                 log::debug!("Interface removed: {:?}", iface);
-								// Call the on_removed callback if it exists
-								if let Ok(callback_guard) = on_removed_clone.lock() {
-									if let Some(callback) = callback_guard.as_ref() {
-										callback(iface.clone());
-									}
-								}
+                                // Call the on_removed callback if it exists
+                                if let Ok(callback_guard) = on_removed_clone.lock() {
+                                    if let Some(callback) = callback_guard.as_ref() {
+                                        callback(iface.clone());
+                                    }
+                                }
                                 let mut interfaces = interfaces_clone.blocking_write();
                                 interfaces.retain(|i| i != &iface);
                             }
@@ -81,8 +83,8 @@ impl IfMonitor {
 
         Ok(IfMonitor {
             interfaces,
-			on_added,
-			on_removed,
+            on_added,
+            on_removed,
             shutdown,
         })
     }
@@ -93,24 +95,24 @@ impl IfMonitor {
     }
 
     /// Registers a callback for when a new interface is added.
-	pub fn on_added<F>(&self, callback: F)
-	where
-		F: Fn(Interface) + Send + 'static,
-	{
-		if let Ok(mut guard) = self.on_added.lock() {
-			*guard = Some(Box::new(callback));
-		}
-	}
+    pub fn on_added<F>(&self, callback: F)
+    where
+        F: Fn(Interface) + Send + 'static,
+    {
+        if let Ok(mut guard) = self.on_added.lock() {
+            *guard = Some(Box::new(callback));
+        }
+    }
 
     /// Registers a callback for when an interface is removed.
-	pub fn on_removed<F>(&self, callback: F)
-	where
-		F: Fn(Interface) + Send + 'static,
-	{
-		if let Ok(mut guard) = self.on_removed.lock() {
-			*guard = Some(Box::new(callback));
-		}
-	}
+    pub fn on_removed<F>(&self, callback: F)
+    where
+        F: Fn(Interface) + Send + 'static,
+    {
+        if let Ok(mut guard) = self.on_removed.lock() {
+            *guard = Some(Box::new(callback));
+        }
+    }
 }
 
 impl Drop for IfMonitor {
