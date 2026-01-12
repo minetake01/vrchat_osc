@@ -57,6 +57,9 @@ pub struct Mdns {
     /// each operating on all relevant interfaces.
     tasks: Vec<MdnsTask>,
 
+    /// Network interface monitor to track interface changes.
+    if_monitor: Arc<if_monitor::IfMonitor>,
+
     /// A map of registered services.
     /// The first key is the service type name (e.g., `_oscjson._tcp.local.`).
     /// The second key is the service instance name (e.g., `MyInstance._oscjson._tcp.local.`),
@@ -94,6 +97,8 @@ impl Mdns {
 		let if_monitor = if_monitor::IfMonitor::new()?;
 		let if_addrs = if_monitor.get_interfaces().await;
         let sockets = setup_multicast_socket(if_addrs).await?;
+
+		let if_monitor = Arc::new(if_monitor);
 
 		let sockets_clone = sockets.clone();
 		if_monitor.on_added(move |ifes| {
@@ -137,6 +142,7 @@ impl Mdns {
                     registered_services.clone(),
                     service_cache.clone(),
                     follow_services.clone(),
+                    if_monitor.clone(),
                 )),
             });
         }
@@ -147,6 +153,7 @@ impl Mdns {
 
         Ok(Mdns {
             tasks,
+            if_monitor,
             registered_services,
             service_cache,
             follow_services,
@@ -183,7 +190,7 @@ impl Mdns {
 				let response_message = create_mdns_response_message(&instance_name, socket_ip, port);
 				let bytes = response_message.to_bytes()?;
 
-                if let Err(e) = send_to_mdns(&task.socket, &bytes).await {
+                if let Err(e) = send_to_mdns(&task.socket, &bytes, &self.if_monitor).await {
                     log::error!(
                         "Failed to send registration announcement for {} via {:?}: {}",
                         instance_name,
@@ -259,7 +266,7 @@ impl Mdns {
         let bytes = query_message.to_bytes()?;
 
         for task in self.tasks.iter() {
-            if let Err(e) = send_to_mdns(&task.socket, &bytes).await {
+            if let Err(e) = send_to_mdns(&task.socket, &bytes, &self.if_monitor).await {
                 log::error!(
                     "Failed to send follow query for {} via {:?}: {}",
                     service_type_name,

@@ -1040,7 +1040,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "socket-pktinfo"
 version = "0.4.0"
-source = "git+https://github.com/minetake01/socket-pktinfo.git?branch=tokio-support#f910408fb2e71a89809fde127f06109698debed8"
+source = "git+https://github.com/minetake01/socket-pktinfo.git?branch=tokio-support#272066ff8bd71adc9bee3a8b92159cccde50f7bf"
 dependencies = [
  "libc",
  "socket2 0.6.1",

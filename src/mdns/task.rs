@@ -1,18 +1,16 @@
 use std::{
     collections::{HashMap, HashSet},
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     sync::Arc,
 };
 
 use hickory_proto::{
-    op::{Message, MessageType, ResponseCode},
-    rr::{Name, RecordType},
-    serialize::binary::{BinDecodable, BinEncodable},
+    op::{Message, MessageType, ResponseCode}, rr::{Name, RecordType}, serialize::binary::{BinDecodable, BinEncodable}
 };
-use socket_pktinfo::AsyncPktInfoUdpSocket;
+use socket_pktinfo::{AsyncPktInfoUdpSocket, PktInfo};
 use tokio::sync::{mpsc, RwLock};
 
-use crate::mdns::MDNS_PORT;
+use crate::mdns::{if_monitor::IfMonitor, utils::send_to_mdns};
 
 use super::utils::{create_mdns_response_message, extract_service_info};
 
@@ -42,6 +40,7 @@ pub async fn server_task(
     registered_services: Arc<RwLock<HashMap<Name, HashMap<Name, u16>>>>,
     service_cache: Arc<RwLock<HashMap<Name, SocketAddr>>>,
     follow_services: Arc<RwLock<HashSet<Name>>>,
+    if_monitor: Arc<IfMonitor>,
 ) {
     let mut buf = [0u8; BUFFER_SIZE]; // Initialize buffer
 
@@ -99,7 +98,7 @@ pub async fn server_task(
         match message.message_type() {
             MessageType::Query => {
                 // Handle incoming mDNS queries.
-                handle_query(message, &socket, &registered_services, pkt_info.addr_src, pkt_info.addr_dst).await;
+                handle_query(message, &socket, &registered_services, &pkt_info, &if_monitor).await;
             }
             MessageType::Response => {
                 // Handle incoming mDNS responses.
@@ -131,8 +130,8 @@ async fn handle_query(
     query_message: Message,
     socket: &AsyncPktInfoUdpSocket,
     registered_services: &Arc<RwLock<HashMap<Name, HashMap<Name, u16>>>>,
-    src_addr: SocketAddr,
-    dist_addr: IpAddr,
+    pkt_info: &PktInfo,
+    if_monitor: &Arc<IfMonitor>,
 ) {
     // Iterate over each query in the mDNS message.
     for query in query_message.queries() {
@@ -162,13 +161,13 @@ async fn handle_query(
                         instance_name,
                         port
                     );
-                    let response_message = create_mdns_response_message(instance_name, dist_addr, port);
+                    let response_message = create_mdns_response_message(instance_name, pkt_info.addr_dst, port);
 					let bytes = response_message.to_bytes();
                     match bytes {
                         Ok(bytes) => {
                             // mDNS unicast response handling
                             if query.mdns_unicast_response {
-                                if let Err(e) = socket.send_to(&bytes, src_addr).await {
+                                if let Err(e) = socket.send_to(&bytes, pkt_info.addr_src).await {
                                     log::error!(
                                         "Failed to send response for instance {}: {}",
                                         instance_name,
@@ -176,9 +175,9 @@ async fn handle_query(
                                     );
                                 }
                             } else {
-                                if let Err(e) = socket.send_to(&bytes, (dist_addr, MDNS_PORT)).await {
+                                if let Err(e) = send_to_mdns(socket, &bytes, if_monitor).await {
                                     log::error!(
-                                        "Failed to send response for instance {}: {}",
+                                        "Failed to send multicast response for instance {}: {}",
                                         instance_name,
                                         e
                                     );
@@ -221,7 +220,8 @@ async fn handle_query(
 					let bytes = response_message.to_bytes();
                     match bytes {
                         Ok(bytes) => {
-                            if let Err(e) = socket.send_to(&bytes, src_addr).await {
+                            // Send as unicast response to the querier
+                            if let Err(e) = socket.send_to(&bytes, pkt_info.addr_src).await {
                                 log::error!(
                                     "Failed to send response for instance {}: {}",
                                     query.name(),
