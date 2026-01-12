@@ -208,17 +208,17 @@ async fn handle_query(
 
             if let Some(instances_map) = services_guard.get(&service_type_key) {
                 // Now check if the specific instance `query.name()` is in this map.
-                if let Some(&addr) = instances_map.get(query.name()) {
+                if let Some(&port) = instances_map.get(query.name()) {
                     log::debug!(
                         "Responding to specific query for registered service instance: {} at {}",
                         query_name_str,
-                        addr
+                        port
                     );
 					let Ok(socket_local_addr) = socket.local_addr() else {
 						log::error!("Failed to get local address of socket for responding to query.");
 						continue;
 					};
-                    let response_message = create_mdns_response_message(query.name(), socket_local_addr.ip(), addr); // Use query.name() as it's the instance name
+                    let response_message = create_mdns_response_message(query.name(), socket_local_addr.ip(), port); // Use query.name() as it's the instance name
 					let bytes = response_message.to_bytes();
                     match bytes {
                         Ok(bytes) => {
