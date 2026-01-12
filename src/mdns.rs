@@ -20,7 +20,7 @@ use tokio::{
     sync::{RwLock, mpsc}, task::JoinHandle
 };
 use utils::{
-    create_mdns_response_message, send_to_mdns
+    send_mdns_announcement, send_to_mdns
 };
 
 use crate::mdns::utils::setup_multicast_socket;
@@ -183,14 +183,9 @@ impl Mdns {
 
         log::info!("Registered service: {} at {}", instance_name, port);
 
-
         for _ in 0..MAX_SEND_ATTEMPTS {
             for task in &self.tasks {
-				let socket_ip = task.socket.local_addr()?.ip();
-				let response_message = create_mdns_response_message(&instance_name, socket_ip, port);
-				let bytes = response_message.to_bytes()?;
-
-                if let Err(e) = send_to_mdns(&task.socket, &bytes, &self.if_monitor).await {
+                if let Err(e) = send_mdns_announcement(&task.socket, &instance_name, port, &self.if_monitor).await {
                     log::error!(
                         "Failed to send registration announcement for {} via {:?}: {}",
                         instance_name,

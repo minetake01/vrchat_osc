@@ -9,6 +9,7 @@ use hickory_proto::{
         rdata::{A, AAAA, PTR, SRV},
         Name, RData, Record,
     },
+    serialize::binary::BinEncodable,
 };
 use socket_pktinfo::AsyncPktInfoUdpSocket;
 
@@ -82,6 +83,74 @@ pub async fn setup_multicast_socket(if_addrs: Vec<if_addrs::Interface>) -> Resul
         Arc::new(AsyncPktInfoUdpSocket::from_std(socket_v4.into())?),
         Arc::new(AsyncPktInfoUdpSocket::from_std(socket_v6.into())?),
     ])
+}
+
+/// Sends mDNS service announcement across all available network interfaces.
+///
+/// This function creates an mDNS response message for each interface with the
+/// appropriate IP address and sends it via multicast.
+///
+/// # Arguments
+/// * `socket` - An `AsyncPktInfoUdpSocket` used for sending the data.
+/// * `instance_name` - The fully qualified name of the service instance.
+/// * `port` - The port number where the service is hosted.
+/// * `if_monitor` - An `IfMonitor` instance to get current network interfaces.
+///
+/// # Returns
+/// A `Result` containing the total number of bytes sent, or an error if sending fails.
+pub async fn send_mdns_announcement(
+    socket: &AsyncPktInfoUdpSocket,
+    instance_name: &Name,
+    port: u16,
+    if_monitor: &IfMonitor,
+) -> Result<usize, hickory_proto::ProtoError> {
+    let local_addr = socket.local_addr()?;
+    let ifs = if_monitor.get_interfaces().await;
+    let mut total_sent: usize = 0;
+
+    if local_addr.is_ipv4() {
+        for if_addr in ifs.iter() {
+            if let if_addrs::IfAddr::V4(ref v4) = if_addr.addr {
+                let response_message = create_mdns_response_message(instance_name, IpAddr::V4(v4.ip), port);
+                let bytes = response_message.to_bytes()?;
+                
+                if let Err(e) = socket.set_multicast_if_v4(&v4.ip) {
+                    log::warn!("Failed to set multicast IPv4 interface {}: {}", v4.ip, e);
+                    continue;
+                }
+                match socket.send_to(&bytes, (MDNS_IPV4_ADDR, MDNS_PORT)).await {
+                    Ok(n) => { total_sent = total_sent.saturating_add(n); },
+                    Err(e) => {
+                        log::warn!("Failed to send mDNS IPv4 announcement on interface {}: {}", v4.ip, e);
+                    }
+                }
+            }
+        }
+    } else if local_addr.is_ipv6() {
+        let mut used_indexes = std::collections::HashSet::new();
+        for if_addr in ifs.iter() {
+            if let if_addrs::IfAddr::V6(ref v6) = if_addr.addr {
+                if let Some(idx) = if_addr.index {
+                    if used_indexes.insert(idx) {
+                        let response_message = create_mdns_response_message(instance_name, IpAddr::V6(v6.ip), port);
+                        let bytes = response_message.to_bytes()?;
+                        
+                        if let Err(e) = socket.set_multicast_if_v6(idx) {
+                            log::warn!("Failed to set multicast IPv6 interface index {}: {}", idx, e);
+                            continue;
+                        }
+                        match socket.send_to(&bytes, (MDNS_IPV6_ADDR, MDNS_PORT)).await {
+                            Ok(n) => { total_sent = total_sent.saturating_add(n); },
+                            Err(e) => {
+                                log::warn!("Failed to send mDNS IPv6 announcement on if_index {}: {}", idx, e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(total_sent)
 }
 
 /// Sends byte data to the appropriate mDNS multicast address (IPv4 or IPv6)
