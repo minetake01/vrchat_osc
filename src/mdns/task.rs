@@ -208,13 +208,14 @@ async fn handle_query(
 
             if let Some(instances_map) = services_guard.get(&service_type_key) {
                 // Now check if the specific instance `query.name()` is in this map.
-                if let Some(&port) = instances_map.get(query.name()) {
+                // Use get_key_value to retrieve the actual registered instance name (not the queried name).
+                if let Some((registered_instance_name, &port)) = instances_map.get_key_value(query.name()) {
                     log::debug!(
                         "Responding to specific query for registered service instance: {} at {}",
-                        query_name_str,
+                        registered_instance_name,
                         port
                     );
-                    let response_message = create_mdns_response_message(query.name(), pkt_info.addr_dst, port); // Use query.name() as it's the instance name
+                    let response_message = create_mdns_response_message(registered_instance_name, pkt_info.addr_dst, port);
 					let bytes = response_message.to_bytes();
                     match bytes {
                         Ok(bytes) => {
@@ -222,7 +223,7 @@ async fn handle_query(
                             if let Err(e) = socket.send_to(&bytes, pkt_info.addr_src).await {
                                 log::error!(
                                     "Failed to send response for instance {}: {}",
-                                    query.name(),
+                                    registered_instance_name,
                                     e
                                 );
                             }
@@ -230,7 +231,7 @@ async fn handle_query(
                         Err(e) => {
                             log::error!(
                                 "Failed to serialize response for instance {}: {}",
-                                query.name(),
+                                registered_instance_name,
                                 e
                             );
                         }
