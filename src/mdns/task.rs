@@ -145,7 +145,9 @@ async fn handle_query(
     if_monitor: &Arc<IfMonitor>,
 ) {
     // Determine the local IP address for the interface that received the query.
-    let interface_ip = resolve_interface_ip(pkt_info, if_monitor).await;
+    // Use the socket's family to prefer IPv4 or IPv6 accordingly.
+    let prefer_ipv6 = socket.local_addr().map(|a| a.is_ipv6()).unwrap_or(false);
+    let interface_ip = resolve_interface_ip(pkt_info, if_monitor, prefer_ipv6).await;
 
     // Iterate over each query in the mDNS message.
     for query in query_message.queries() {

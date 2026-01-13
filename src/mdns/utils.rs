@@ -438,11 +438,26 @@ pub fn extract_service_info(message: &Message) -> Option<(Name, SocketAddr)> {
 }
 
 /// Resolves the local IP address for the interface that received the packet.
-pub async fn resolve_interface_ip(pkt_info: &PktInfo, if_monitor: &Arc<IfMonitor>) -> IpAddr {
+pub async fn resolve_interface_ip(
+    pkt_info: &PktInfo,
+    if_monitor: &Arc<IfMonitor>,
+    prefer_ipv6: bool,
+) -> IpAddr {
     if pkt_info.addr_dst.is_multicast() {
         let ifs = if_monitor.get_interfaces().await;
-        ifs.iter()
-            .find(|iface| iface.index == Some(pkt_info.if_index))
+        let iface_addrs = ifs.iter().filter(|iface| iface.index == Some(pkt_info.if_index));
+
+        // Try to find the preferred address family first.
+        let found = iface_addrs
+            .clone()
+            .find(|iface| match iface.addr {
+                if_addrs::IfAddr::V4(_) => !prefer_ipv6,
+                if_addrs::IfAddr::V6(_) => prefer_ipv6,
+            })
+            // If the preferred family is not found, fallback to any address on the same interface.
+            .or_else(|| iface_addrs.clone().next());
+
+        found
             .map(|iface| match iface.addr {
                 if_addrs::IfAddr::V4(ref v4) => IpAddr::V4(v4.ip),
                 if_addrs::IfAddr::V6(ref v6) => IpAddr::V6(v6.ip),
