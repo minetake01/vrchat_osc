@@ -137,11 +137,11 @@ pub async fn send_mdns_announcement(
             }
         }
     } else if local_addr.is_ipv6() {
-        let mut used_indexes = std::collections::HashSet::new();
+        let mut joined_ifindexes = std::collections::HashSet::new();
         for if_addr in ifs.iter() {
             if let if_addrs::IfAddr::V6(ref v6) = if_addr.addr {
                 if let Some(idx) = if_addr.index {
-                    if used_indexes.insert(idx) {
+                    if joined_ifindexes.insert(idx) {
                         let response_message =
                             create_mdns_response_message(instance_name, IpAddr::V6(v6.ip), port);
                         let bytes = response_message.to_bytes()?;
@@ -221,11 +221,11 @@ pub async fn send_to_mdns(
         Ok(total_sent)
     } else if local_addr.is_ipv6() {
         // Iterate all IPv6 interfaces and send via each
-        let mut used_indexes = std::collections::HashSet::new();
+        let mut joined_ifindexes = std::collections::HashSet::new();
         for if_addr in ifs.into_iter() {
             if let if_addrs::IfAddr::V6(_v6) = if_addr.addr {
                 if let Some(idx) = if_addr.index {
-                    if used_indexes.insert(idx) {
+                    if joined_ifindexes.insert(idx) {
                         if let Err(e) = socket.set_multicast_if_v6(idx) {
                             log::warn!(
                                 "Failed to set multicast IPv6 interface index {}: {}",
