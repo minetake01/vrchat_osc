@@ -100,35 +100,55 @@ impl Mdns {
         let if_monitor = Arc::new(if_monitor);
 
         let sockets_clone = sockets.clone();
-        if_monitor.on_added(move |ifes| match ifes.ip() {
+        if_monitor.on_added(move |iface| match iface.ip() {
             IpAddr::V4(ip) => {
-                sockets_clone[0]
-                    .join_multicast_v4(&MDNS_IPV4_ADDR, &ip)
-                    .ok();
+                if let Err(e) = sockets_clone[0].join_multicast_v4(&MDNS_IPV4_ADDR, &ip) {
+                    log::warn!(
+                        "Failed to join IPv4 mDNS multicast group {} on interface {}: {}",
+                        MDNS_IPV4_ADDR,
+                        ip,
+                        e
+                    );
+                }
             }
             IpAddr::V6(_) => {
-                let Some(if_index) = ifes.index else {
+                let Some(if_index) = iface.index else {
                     return;
                 };
-                sockets_clone[1]
-                    .join_multicast_v6(&MDNS_IPV6_ADDR, if_index)
-                    .ok();
+                if let Err(e) = sockets_clone[1].join_multicast_v6(&MDNS_IPV6_ADDR, if_index) {
+                    log::warn!(
+                        "Failed to join IPv6 mDNS multicast group {} on interface index {}: {}",
+                        MDNS_IPV6_ADDR,
+                        if_index,
+                        e
+                    );
+                }
             }
         });
         let sockets_clone = sockets.clone();
-        if_monitor.on_removed(move |ifes| match ifes.ip() {
+        if_monitor.on_removed(move |iface| match iface.ip() {
             IpAddr::V4(ip) => {
-                sockets_clone[0]
-                    .leave_multicast_v4(&MDNS_IPV4_ADDR, &ip)
-                    .ok();
+                if let Err(e) = sockets_clone[0].leave_multicast_v4(&MDNS_IPV4_ADDR, &ip) {
+                    log::warn!(
+                        "Failed to leave IPv4 mDNS multicast group {} on interface {}: {}",
+                        MDNS_IPV4_ADDR,
+                        ip,
+                        e
+                    );
+                }
             }
             IpAddr::V6(_) => {
-                let Some(if_index) = ifes.index else {
+                let Some(if_index) = iface.index else {
                     return;
                 };
-                sockets_clone[1]
-                    .leave_multicast_v6(&MDNS_IPV6_ADDR, if_index)
-                    .ok();
+                if let Err(e) = sockets_clone[1].leave_multicast_v6(&MDNS_IPV6_ADDR, if_index) {
+                    log::warn!(
+                        "Failed to leave IPv6 mDNS multicast group {} on interface index {}: {}",
+                        MDNS_IPV6_ADDR,
+                        if_index,
+                        e
+                    );
+                }
             }
         });
 
