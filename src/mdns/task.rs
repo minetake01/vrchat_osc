@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, RwLock};
 
 use crate::mdns::{if_monitor::IfMonitor, utils::send_to_mdns};
 
-use super::utils::{create_mdns_response_message, extract_service_info};
+use super::utils::{create_mdns_response_message, extract_service_info, resolve_interface_ip};
 
 /// Size of the buffer used for receiving UDP packets. 4KB is a common size.
 const BUFFER_SIZE: usize = 4096;
@@ -144,6 +144,9 @@ async fn handle_query(
     pkt_info: &PktInfo,
     if_monitor: &Arc<IfMonitor>,
 ) {
+    // Determine the local IP address for the interface that received the query.
+    let interface_ip = resolve_interface_ip(pkt_info, if_monitor).await;
+
     // Iterate over each query in the mDNS message.
     for query in query_message.queries() {
         log::trace!(
@@ -172,8 +175,9 @@ async fn handle_query(
                         instance_name,
                         port
                     );
+
                     let response_message =
-                        create_mdns_response_message(instance_name, pkt_info.addr_dst, port);
+                        create_mdns_response_message(instance_name, interface_ip, port);
                     let bytes = response_message.to_bytes();
                     match bytes {
                         Ok(bytes) => {
@@ -227,9 +231,10 @@ async fn handle_query(
                         registered_instance_name,
                         port
                     );
+
                     let response_message = create_mdns_response_message(
                         registered_instance_name,
-                        pkt_info.addr_dst,
+                        interface_ip,
                         port,
                     );
                     let bytes = response_message.to_bytes();
@@ -353,3 +358,4 @@ async fn handle_response(
         log::trace!("Response message did not contain complete service info or was not a service announcement.");
     }
 }
+

@@ -12,7 +12,7 @@ use hickory_proto::{
     },
     serialize::binary::BinEncodable,
 };
-use socket_pktinfo::AsyncPktInfoUdpSocket;
+use socket_pktinfo::{AsyncPktInfoUdpSocket, PktInfo};
 
 use crate::mdns::{if_monitor::IfMonitor, MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT};
 
@@ -269,12 +269,12 @@ pub async fn send_to_mdns(
 ///
 /// # Arguments
 /// * `instance_name` - The fully qualified name of the service instance (e.g., `MyInstance._myservice._tcp.local.`).
-/// * `socket_ip` - The `IpAddr` to be included in the A/AAAA records.
+/// * `interface_ip` - The `IpAddr` to be included in the A/AAAA records.
 /// * `port` - The port number where the service instance is hosted.
 ///
 /// # Returns
 /// An mDNS `Message` configured as a response, ready to be serialized and sent.
-pub fn create_mdns_response_message(instance_name: &Name, socket_ip: IpAddr, port: u16) -> Message {
+pub fn create_mdns_response_message(instance_name: &Name, interface_ip: IpAddr, port: u16) -> Message {
     let mut message = Message::new();
     message
         .set_id(0)
@@ -306,7 +306,7 @@ pub fn create_mdns_response_message(instance_name: &Name, socket_ip: IpAddr, por
 
     // --- A or AAAA Record (Additional Section) ---
     // Provides the IP address for the target host specified in the SRV record (here, `instance_name`).
-    match socket_ip {
+    match interface_ip {
         IpAddr::V4(ipv4_addr) => {
             message.add_additional(Record::from_rdata(
                 instance_name.clone(),
@@ -435,4 +435,20 @@ pub fn extract_service_info(message: &Message) -> Option<(Name, SocketAddr)> {
     }
 
     None
+}
+
+/// Resolves the local IP address for the interface that received the packet.
+pub async fn resolve_interface_ip(pkt_info: &PktInfo, if_monitor: &Arc<IfMonitor>) -> IpAddr {
+    if pkt_info.addr_dst.is_multicast() {
+        let ifs = if_monitor.get_interfaces().await;
+        ifs.iter()
+            .find(|iface| iface.index == Some(pkt_info.if_index))
+            .map(|iface| match iface.addr {
+                if_addrs::IfAddr::V4(ref v4) => IpAddr::V4(v4.ip),
+                if_addrs::IfAddr::V6(ref v6) => IpAddr::V6(v6.ip),
+            })
+            .unwrap_or(pkt_info.addr_dst)
+    } else {
+        pkt_info.addr_dst
+    }
 }
