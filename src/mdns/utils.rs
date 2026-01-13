@@ -55,7 +55,7 @@ pub async fn setup_multicast_socket(
 
     let mut joined_ifindexes = HashSet::new();
     for if_addr in if_addrs.iter() {
-        match if_addr.addr.clone() {
+        match &if_addr.addr {
             if_addrs::IfAddr::V4(ifv4) => {
                 socket_v4.join_multicast_v4(&MDNS_IPV4_ADDR, &ifv4.ip)?;
                 log::debug!(
