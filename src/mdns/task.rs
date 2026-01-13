@@ -240,13 +240,23 @@ async fn handle_query(
                     let bytes = response_message.to_bytes();
                     match bytes {
                         Ok(bytes) => {
-                            // Send as unicast response to the querier
-                            if let Err(e) = socket.send_to(&bytes, pkt_info.addr_src).await {
-                                log::error!(
-                                    "Failed to send response for instance {}: {}",
-                                    registered_instance_name,
-                                    e
-                                );
+                            // mDNS unicast response handling
+                            if query.mdns_unicast_response {
+                                if let Err(e) = socket.send_to(&bytes, pkt_info.addr_src).await {
+                                    log::error!(
+                                        "Failed to send response for instance {}: {}",
+                                        registered_instance_name,
+                                        e
+                                    );
+                                }
+                            } else {
+                                if let Err(e) = send_to_mdns(socket, &bytes, if_monitor).await {
+                                    log::error!(
+                                        "Failed to send multicast response for instance {}: {}",
+                                        registered_instance_name,
+                                        e
+                                    );
+                                }
                             }
                         }
                         Err(e) => {
