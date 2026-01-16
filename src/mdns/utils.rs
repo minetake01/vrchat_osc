@@ -445,17 +445,21 @@ pub async fn resolve_interface_ip(
 ) -> IpAddr {
     if pkt_info.addr_dst.is_multicast() {
         let ifs = if_monitor.get_interfaces().await;
-        let iface_addrs = ifs.iter().filter(|iface| iface.index == Some(pkt_info.if_index));
+        let iface_addrs: Vec<_> = ifs
+            .iter()
+            .filter(|iface| iface.index == Some(pkt_info.if_index))
+            .collect();
 
         // Try to find the preferred address family first.
         let found = iface_addrs
-            .clone()
+            .iter()
             .find(|iface| match iface.addr {
                 if_addrs::IfAddr::V4(_) => !prefer_ipv6,
                 if_addrs::IfAddr::V6(_) => prefer_ipv6,
             })
+            .copied()
             // If the preferred family is not found, fallback to any address on the same interface.
-            .or_else(|| iface_addrs.clone().next());
+            .or_else(|| iface_addrs.first().copied());
 
         found
             .map(|iface| match iface.addr {
