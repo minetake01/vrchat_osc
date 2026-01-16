@@ -53,6 +53,9 @@ pub async fn setup_multicast_socket(
     socket_v4.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, MDNS_PORT).into())?;
     socket_v6.bind(&SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, MDNS_PORT, 0, 0).into())?;
 
+    socket_v4.set_multicast_loop_v4(true)?;
+    socket_v6.set_multicast_loop_v6(true)?;
+
     let mut joined_ifindexes = HashSet::new();
     for if_addr in if_addrs.iter() {
         match &if_addr.addr {
@@ -78,9 +81,6 @@ pub async fn setup_multicast_socket(
             }
         }
     }
-
-    socket_v4.set_multicast_loop_v4(true)?;
-    socket_v6.set_multicast_loop_v6(true)?;
 
     Ok([
         Arc::new(AsyncPktInfoUdpSocket::from_std(socket_v4.into())?),
