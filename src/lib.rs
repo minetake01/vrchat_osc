@@ -65,7 +65,6 @@ pub struct VRChatOSC {
     /// Stores registered service handles, mapping service name to its handle.
     service_handles: Arc<RwLock<HashMap<String, ServiceHandle>>>,
     /// Callback function to be executed when a new mDNS service is discovered.
-    /// The Name is the service instance name, and SocketAddr is its resolved address.
     on_service_discovered_callback:
         Arc<RwLock<Option<Arc<dyn Fn(ServiceType) + Send + Sync + 'static>>>>,
 }
@@ -168,7 +167,7 @@ impl VRChatOSC {
                         if let Ok((_, packet)) = rosc::decoder::decode_udp(&buf[..len]) {
                             handler(packet); // Call the provided handler with the decoded packet.
                         } else {
-                            log::warn!("Failed to decode OSC packet from {}", addr);
+                            log::debug!("Failed to decode OSC packet from {}", addr);
                         }
                     }
                     Err(e) => {
@@ -178,8 +177,8 @@ impl VRChatOSC {
                             log::warn!("Socket connection error ({}). Task for {:?} might need to be restarted or interface is down.", e, socket.local_addr().ok());
                             break;
                         } else {
-                            log::error!(
-                                "Failed to receive data on mDNS socket {:?}: {}",
+                            log::warn!(
+                                "Failed to receive data on OSC socket {:?}: {}",
                                 socket.local_addr().ok(),
                                 e
                             );
@@ -191,9 +190,12 @@ impl VRChatOSC {
             }
         });
 
+        // Create mDNS service announcements.
+        let service_name_upper_camel = service_name.to_case(Case::UpperCamel); // Convert service name case.
+
         // Start OSCQuery server (HTTP server)
         let host_info = HostInfo::new(
-            service_name.to_string(),
+            service_name_upper_camel.clone(),
             osc_local_addr.ip(),   // Use the IP of the OSC server.
             osc_local_addr.port(), // Use the port of the OSC server.
         );
@@ -202,9 +204,6 @@ impl VRChatOSC {
         let osc_query_local_addr = osc_query
             .serve(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
             .await?;
-
-        // Create mDNS service announcements.
-        let service_name_upper_camel = service_name.to_case(Case::UpperCamel); // Convert service name case.
 
         // Register the OSC and OSCQuery services with mDNS.
         self.mdns
@@ -281,7 +280,7 @@ impl VRChatOSC {
             .await;
 
         if services.is_empty() {
-            log::warn!("No mDNS services found matching the expression: {}", to);
+            log::info!("No mDNS services found matching the expression: {}", to);
             return Ok(());
         }
 
@@ -335,7 +334,7 @@ impl VRChatOSC {
             .await;
 
         if services.is_empty() {
-            log::warn!(
+            log::info!(
                 "No mDNS services found for get_parameter matching expression: {}",
                 from
             );

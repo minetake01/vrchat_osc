@@ -1,9 +1,10 @@
+mod if_monitor;
 mod task;
 mod utils;
 
 use std::{
     collections::{HashMap, HashSet},
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
     time::Duration,
 };
@@ -13,16 +14,19 @@ use hickory_proto::{
     rr::{Name, RecordType},
     serialize::binary::BinEncodable,
 };
+use socket_pktinfo::AsyncPktInfoUdpSocket;
 use task::server_task;
 use tokio::{
-    net::UdpSocket,
     sync::{mpsc, RwLock},
     task::JoinHandle,
 };
-use utils::{
-    create_mdns_response_message, send_to_mdns, setup_multicast_socket_v4,
-    setup_multicast_socket_v6,
-};
+use utils::{send_mdns_announcement, send_to_mdns};
+
+use crate::mdns::utils::setup_multicast_socket;
+
+const MDNS_PORT: u16 = 5353;
+const MDNS_IPV4_ADDR: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
+const MDNS_IPV6_ADDR: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xFB);
 
 /// Maximum number of attempts to send a multicast message.
 const MAX_SEND_ATTEMPTS: usize = 3;
@@ -35,16 +39,13 @@ pub enum Error {
     #[error("I/O Error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("Socket Binding Error: IPv4: {ipv4}, IPv6: {ipv6}")]
-    SocketBindError {
-        ipv4: std::io::Error,
-        ipv6: std::io::Error,
-    },
+    #[error("Failed to bind any sockets for mDNS.")]
+    AnySocketBindError,
 }
 
 /// Represents a task associated with a UDP socket for mDNS operations.
 struct MdnsTask {
-    socket: Arc<UdpSocket>,
+    socket: Arc<AsyncPktInfoUdpSocket>,
     handle: JoinHandle<()>,
 }
 
@@ -54,6 +55,9 @@ pub struct Mdns {
     /// List of active mDNS tasks, typically one for IPv4 and one for IPv6,
     /// each operating on all relevant interfaces.
     tasks: Vec<MdnsTask>,
+
+    /// Network interface monitor to track interface changes.
+    if_monitor: Arc<if_monitor::IfMonitor>,
 
     /// A map of registered services.
     /// The first key is the service type name (e.g., `_oscjson._tcp.local.`).
@@ -89,67 +93,90 @@ impl Mdns {
         let mut tasks = Vec::new();
 
         // Attempt to bind a UDP socket for multicast
-        let (socket_v4, socket_v6) = (
-            setup_multicast_socket_v4().await,
-            setup_multicast_socket_v6().await,
-        );
+        let if_monitor = if_monitor::IfMonitor::new()?;
+        let if_addrs = if_monitor.get_interfaces().await;
+        let sockets = setup_multicast_socket(if_addrs).await?;
 
-        if socket_v4.is_err() && socket_v6.is_err() {
-            log::error!("Failed to bind any multicast sockets for mDNS");
-            return Err(Error::SocketBindError {
-                ipv4: socket_v4.err().unwrap(),
-                ipv6: socket_v6.err().unwrap(),
+        let if_monitor = Arc::new(if_monitor);
+
+        let sockets_clone = sockets.clone();
+        if_monitor.on_added(move |iface| match iface.ip() {
+            IpAddr::V4(ip) => {
+                if let Err(e) = sockets_clone[0].join_multicast_v4(&MDNS_IPV4_ADDR, &ip) {
+                    log::warn!(
+                        "Failed to join IPv4 mDNS multicast group {} on interface {}: {}",
+                        MDNS_IPV4_ADDR,
+                        ip,
+                        e
+                    );
+                }
+            }
+            IpAddr::V6(_) => {
+                let Some(if_index) = iface.index else {
+                    return;
+                };
+                if let Err(e) = sockets_clone[1].join_multicast_v6(&MDNS_IPV6_ADDR, if_index) {
+                    log::warn!(
+                        "Failed to join IPv6 mDNS multicast group {} on interface index {}: {}",
+                        MDNS_IPV6_ADDR,
+                        if_index,
+                        e
+                    );
+                }
+            }
+        });
+        let sockets_clone = sockets.clone();
+        if_monitor.on_removed(move |iface| match iface.ip() {
+            IpAddr::V4(ip) => {
+                if let Err(e) = sockets_clone[0].leave_multicast_v4(&MDNS_IPV4_ADDR, &ip) {
+                    log::warn!(
+                        "Failed to leave IPv4 mDNS multicast group {} on interface {}: {}",
+                        MDNS_IPV4_ADDR,
+                        ip,
+                        e
+                    );
+                }
+            }
+            IpAddr::V6(_) => {
+                let Some(if_index) = iface.index else {
+                    return;
+                };
+                if let Err(e) = sockets_clone[1].leave_multicast_v6(&MDNS_IPV6_ADDR, if_index) {
+                    log::warn!(
+                        "Failed to leave IPv6 mDNS multicast group {} on interface index {}: {}",
+                        MDNS_IPV6_ADDR,
+                        if_index,
+                        e
+                    );
+                }
+            }
+        });
+
+        for socket in sockets {
+            log::debug!(
+                "Successfully bound to multicast socket: {:?}",
+                socket.local_addr()
+            );
+            tasks.push(MdnsTask {
+                socket: socket.clone(),
+                handle: tokio::spawn(server_task(
+                    socket,
+                    notifier_tx.clone(),
+                    registered_services.clone(),
+                    service_cache.clone(),
+                    follow_services.clone(),
+                    if_monitor.clone(),
+                )),
             });
         }
 
-        match socket_v4 {
-            Ok(socket) => {
-                log::info!(
-                    "Successfully bound to IPv4 multicast socket: {:?}",
-                    socket.local_addr()
-                );
-                let socket = Arc::new(socket);
-                tasks.push(MdnsTask {
-                    socket: socket.clone(),
-                    handle: tokio::spawn(server_task(
-                        socket,
-                        notifier_tx.clone(),
-                        registered_services.clone(),
-                        service_cache.clone(),
-                        follow_services.clone(),
-                    )),
-                });
-            }
-            Err(e) => {
-                log::warn!("Failed to bind IPv4 multicast socket: {}", e);
-            }
-        }
-
-        match socket_v6 {
-            Ok(socket) => {
-                log::info!(
-                    "Successfully bound to IPv6 multicast socket: {:?}",
-                    socket.local_addr()
-                );
-                let socket = Arc::new(socket);
-                tasks.push(MdnsTask {
-                    socket: socket.clone(),
-                    handle: tokio::spawn(server_task(
-                        socket,
-                        notifier_tx.clone(),
-                        registered_services.clone(),
-                        service_cache.clone(),
-                        follow_services.clone(),
-                    )),
-                });
-            }
-            Err(e) => {
-                log::warn!("Failed to bind IPv6 multicast socket: {}", e);
-            }
+        if tasks.is_empty() {
+            return Err(Error::AnySocketBindError);
         }
 
         Ok(Mdns {
             tasks,
+            if_monitor,
             registered_services,
             service_cache,
             follow_services,
@@ -179,14 +206,12 @@ impl Mdns {
 
         log::info!("Registered service: {} at {}", instance_name, port);
 
-
         for _ in 0..MAX_SEND_ATTEMPTS {
             for task in &self.tasks {
-				let socket_ip = task.socket.local_addr()?.ip();
-				let response_message = create_mdns_response_message(&instance_name, socket_ip, port);
-				let bytes = response_message.to_bytes()?;
-
-                if let Err(e) = send_to_mdns(&task.socket, &bytes).await {
+                if let Err(e) =
+                    send_mdns_announcement(&task.socket, &instance_name, port, &self.if_monitor)
+                        .await
+                {
                     log::error!(
                         "Failed to send registration announcement for {} via {:?}: {}",
                         instance_name,
@@ -221,7 +246,7 @@ impl Mdns {
                 removed = true;
                 if instances.is_empty() {
                     services_guard.remove(&base_service_name);
-                    log::info!(
+                    log::debug!(
                         "Removed service type from registry as no instances remain: {}",
                         base_service_name
                     );
@@ -255,14 +280,14 @@ impl Mdns {
             }
         }
 
-        log::info!("Now following service type: {}", service_type_name);
+        log::debug!("Now following service type: {}", service_type_name);
 
         let mut query_message = Message::new();
         query_message.add_query(Query::query(service_type_name.clone(), RecordType::ANY));
         let bytes = query_message.to_bytes()?;
 
         for task in self.tasks.iter() {
-            if let Err(e) = send_to_mdns(&task.socket, &bytes).await {
+            if let Err(e) = send_to_mdns(&task.socket, &bytes, &self.if_monitor).await {
                 log::error!(
                     "Failed to send follow query for {} via {:?}: {}",
                     service_type_name,
@@ -281,7 +306,7 @@ impl Mdns {
     pub async fn unfollow(&self, service_type_name: Name) {
         let mut follow_guard = self.follow_services.write().await;
         if follow_guard.remove(&service_type_name) {
-            log::info!("Stopped following service type: {}", service_type_name);
+            log::debug!("Stopped following service type: {}", service_type_name);
         } else {
             log::debug!(
                 "Attempted to unfollow a service type not being followed: {}",
@@ -330,6 +355,6 @@ impl Drop for Mdns {
         for task in &mut self.tasks {
             task.handle.abort();
         }
-        log::info!("All mDNS tasks have been cleaned up.");
+        log::debug!("All mDNS tasks have been cleaned up.");
     }
 }

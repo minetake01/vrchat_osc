@@ -31,7 +31,9 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 convert_case = "0.7"
 wildmatch = "2.4.0"
-socket2 = "0.5"
+socket2 = "0.6"
+if-addrs = "0.14"
+socket-pktinfo = { git = "https://github.com/minetake01/socket-pktinfo.git", branch = "tokio-support", features = ["tokio"] }
 
 [dev-dependencies]
 env_logger = "0.11"

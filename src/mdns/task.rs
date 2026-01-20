@@ -9,12 +9,12 @@ use hickory_proto::{
     rr::{Name, RecordType},
     serialize::binary::{BinDecodable, BinEncodable},
 };
-use tokio::{
-    net::UdpSocket,
-    sync::{mpsc, RwLock},
-};
+use socket_pktinfo::{AsyncPktInfoUdpSocket, PktInfo};
+use tokio::sync::{mpsc, RwLock};
 
-use super::utils::{create_mdns_response_message, extract_service_info};
+use crate::mdns::{if_monitor::IfMonitor, utils::send_to_mdns};
+
+use super::utils::{create_mdns_response_message, extract_service_info, resolve_interface_ip};
 
 /// Size of the buffer used for receiving UDP packets. 4KB is a common size.
 const BUFFER_SIZE: usize = 4096;
@@ -27,7 +27,7 @@ const BUFFER_SIZE: usize = 4096;
 /// - If it's a response, `handle_response` is called.
 ///
 /// # Arguments
-/// * `socket` - An `Arc<UdpSocket>` for mDNS communication. This socket should already be
+/// * `socket` - An `Arc<AsyncPktInfoUdpSocket>` for mDNS communication. This socket should already be
 ///   configured for multicast.
 /// * `notifier_tx` - An `mpsc::Sender` to notify about discovered services.
 /// * `registered_services` - An `Arc<RwLock<...>>` providing access to services registered
@@ -36,19 +36,21 @@ const BUFFER_SIZE: usize = 4096;
 ///   discovered services from responses.
 /// * `follow_services` - An `Arc<RwLock<...>>` containing the set of service types this
 ///   instance is actively interested in.
+/// * `if_monitor` - An `Arc<IfMonitor>` to monitor network interface changes.
 pub async fn server_task(
-    socket: Arc<UdpSocket>,
+    socket: Arc<AsyncPktInfoUdpSocket>,
     notifier_tx: mpsc::Sender<(Name, SocketAddr)>,
     registered_services: Arc<RwLock<HashMap<Name, HashMap<Name, u16>>>>,
     service_cache: Arc<RwLock<HashMap<Name, SocketAddr>>>,
     follow_services: Arc<RwLock<HashSet<Name>>>,
+    if_monitor: Arc<IfMonitor>,
 ) {
     let mut buf = [0u8; BUFFER_SIZE]; // Initialize buffer
 
     loop {
         // Attempt to receive data from the UDP socket with sender address.
-        let (len, sender_addr) = match socket.recv_from(&mut buf).await {
-            Ok((len, addr)) => (len, addr),
+        let (len, pkt_info) = match socket.recv(&mut buf).await {
+            Ok(v) => v,
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::ConnectionReset
                     || e.kind() == std::io::ErrorKind::BrokenPipe
@@ -79,7 +81,7 @@ pub async fn server_task(
                 log::warn!(
                     "Failed to parse mDNS message from bytes ({} bytes received) from {}: {}",
                     len,
-                    sender_addr,
+                    pkt_info.addr_src,
                     e
                 );
                 continue;
@@ -99,7 +101,14 @@ pub async fn server_task(
         match message.message_type() {
             MessageType::Query => {
                 // Handle incoming mDNS queries.
-                handle_query(message, socket.clone(), &registered_services, sender_addr).await;
+                handle_query(
+                    message,
+                    &socket,
+                    &registered_services,
+                    &pkt_info,
+                    &if_monitor,
+                )
+                .await;
             }
             MessageType::Response => {
                 // Handle incoming mDNS responses.
@@ -124,18 +133,25 @@ pub async fn server_task(
 ///
 /// # Arguments
 /// * `query_message` - The parsed `Message` object representing the mDNS query.
-/// * `socket` - The `Arc<UdpSocket>` to send responses from.
+/// * `socket` - The `AsyncPktInfoUdpSocket` to send responses from.
 /// * `registered_services` - Read-only access to the map of locally registered services.
-/// * `sender_addr` - The address of the client that sent the query.
+/// * `pkt_info` - Packet information including destination address and interface index.
+/// * `if_monitor` - An `Arc<IfMonitor>` to monitor network interface changes.
 async fn handle_query(
     query_message: Message,
-    socket: Arc<UdpSocket>,
+    socket: &AsyncPktInfoUdpSocket,
     registered_services: &Arc<RwLock<HashMap<Name, HashMap<Name, u16>>>>,
-    sender_addr: SocketAddr,
+    pkt_info: &PktInfo,
+    if_monitor: &Arc<IfMonitor>,
 ) {
+    // Determine the local IP address for the interface that received the query.
+    // Use the socket's family to prefer IPv4 or IPv6 accordingly.
+    let prefer_ipv6 = socket.local_addr().map(|a| a.is_ipv6()).unwrap_or(false);
+    let interface_ip = resolve_interface_ip(pkt_info, if_monitor, prefer_ipv6).await;
+
     // Iterate over each query in the mDNS message.
     for query in query_message.queries() {
-        log::debug!(
+        log::trace!(
             "Received mDNS query for service name: {}, type: {:?}, class: {:?}",
             query.name(),
             query.query_type(),
@@ -155,26 +171,35 @@ async fn handle_query(
             // `query.name()` is the service type, e.g. `_oscjson._tcp.local.`
             if let Some(instances_map) = services_guard.get(query.name()) {
                 for (instance_name, &port) in instances_map.iter() {
-                    log::info!(
+                    log::debug!(
                         "Responding to PTR/ANY query for service type {} with instance: {} at {}",
                         query_name_str,
                         instance_name,
                         port
                     );
-					let Ok(socket_local_addr) = socket.local_addr() else {
-						log::error!("Failed to get local address of socket for responding to query.");
-						continue;
-					};
-                    let response_message = create_mdns_response_message(instance_name, socket_local_addr.ip(), port);
-					let bytes = response_message.to_bytes();
+
+                    let response_message =
+                        create_mdns_response_message(instance_name, interface_ip, port);
+                    let bytes = response_message.to_bytes();
                     match bytes {
                         Ok(bytes) => {
-                            if let Err(e) = socket.send_to(&bytes, sender_addr).await {
-                                log::error!(
-                                    "Failed to send response for instance {}: {}",
-                                    instance_name,
-                                    e
-                                );
+                            // mDNS unicast response handling
+                            if query.mdns_unicast_response {
+                                if let Err(e) = socket.send_to(&bytes, pkt_info.addr_src).await {
+                                    log::error!(
+                                        "Failed to send response for instance {}: {}",
+                                        instance_name,
+                                        e
+                                    );
+                                }
+                            } else {
+                                if let Err(e) = send_to_mdns(socket, &bytes, if_monitor).await {
+                                    log::error!(
+                                        "Failed to send multicast response for instance {}: {}",
+                                        instance_name,
+                                        e
+                                    );
+                                }
                             }
                         }
                         Err(e) => {
@@ -199,32 +224,47 @@ async fn handle_query(
 
             if let Some(instances_map) = services_guard.get(&service_type_key) {
                 // Now check if the specific instance `query.name()` is in this map.
-                if let Some(&addr) = instances_map.get(query.name()) {
-                    log::info!(
+                // Use get_key_value to retrieve the actual registered instance name (not the queried name).
+                if let Some((registered_instance_name, &port)) =
+                    instances_map.get_key_value(query.name())
+                {
+                    log::debug!(
                         "Responding to specific query for registered service instance: {} at {}",
-                        query_name_str,
-                        addr
+                        registered_instance_name,
+                        port
                     );
-					let Ok(socket_local_addr) = socket.local_addr() else {
-						log::error!("Failed to get local address of socket for responding to query.");
-						continue;
-					};
-                    let response_message = create_mdns_response_message(query.name(), socket_local_addr.ip(), addr); // Use query.name() as it's the instance name
-					let bytes = response_message.to_bytes();
+
+                    let response_message = create_mdns_response_message(
+                        registered_instance_name,
+                        interface_ip,
+                        port,
+                    );
+                    let bytes = response_message.to_bytes();
                     match bytes {
                         Ok(bytes) => {
-                            if let Err(e) = socket.send_to(&bytes, sender_addr).await {
-                                log::error!(
-                                    "Failed to send response for instance {}: {}",
-                                    query.name(),
-                                    e
-                                );
+                            // mDNS unicast response handling
+                            if query.mdns_unicast_response {
+                                if let Err(e) = socket.send_to(&bytes, pkt_info.addr_src).await {
+                                    log::error!(
+                                        "Failed to send response for instance {}: {}",
+                                        registered_instance_name,
+                                        e
+                                    );
+                                }
+                            } else {
+                                if let Err(e) = send_to_mdns(socket, &bytes, if_monitor).await {
+                                    log::error!(
+                                        "Failed to send multicast response for instance {}: {}",
+                                        registered_instance_name,
+                                        e
+                                    );
+                                }
                             }
                         }
                         Err(e) => {
                             log::error!(
                                 "Failed to serialize response for instance {}: {}",
-                                query.name(),
+                                registered_instance_name,
                                 e
                             );
                         }
@@ -245,6 +285,7 @@ async fn handle_query(
 /// # Arguments
 /// * `response_message` - The parsed `Message` object representing the mDNS response.
 /// * `notifier_tx` - The sender channel to notify about newly discovered/updated services.
+/// * `registered_services` - Read-only access to the map of locally registered services.
 /// * `service_cache` - Writable access to the cache of discovered services.
 /// * `follow_services` - Read-only access to the set of service types being followed.
 async fn handle_response(
@@ -260,7 +301,7 @@ async fn handle_response(
     if let Some((discovered_instance_name, discovered_addr)) =
         extract_service_info(&response_message)
     {
-        log::debug!(
+        log::trace!(
             "Potential service discovered in response: {} at {}",
             discovered_instance_name,
             discovered_addr
@@ -290,7 +331,7 @@ async fn handle_response(
 
             if old_value.map_or(true, |old_addr| old_addr != discovered_addr) {
                 // If it's a new service or its address changed.
-                log::info!(
+                log::debug!(
                     "Service cache updated for: {} at {} (was {:?})",
                     discovered_instance_name,
                     discovered_addr,
@@ -307,14 +348,9 @@ async fn handle_response(
                         discovered_instance_name,
                         e
                     );
-                } else {
-                    log::debug!(
-                        "Sent notification for service: {}",
-                        discovered_instance_name
-                    );
                 }
             } else {
-                log::debug!(
+                log::trace!(
                     "Service cache already up-to-date for: {} at {}",
                     discovered_instance_name,
                     discovered_addr
@@ -334,3 +370,4 @@ async fn handle_response(
         log::trace!("Response message did not contain complete service info or was not a service announcement.");
     }
 }
+
