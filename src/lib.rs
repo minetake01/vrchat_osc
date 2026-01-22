@@ -14,7 +14,7 @@ use oscquery::models::{HostInfo, OscNode, OscRootNode};
 use rosc::OscPacket;
 use std::{
     collections::HashMap,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
 use tokio::{
@@ -39,6 +39,8 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("Fetch error: {0}")]
     FetchError(#[from] fetch::Error),
+    #[error("No valid network interface found: no non-loopback IPv4 address available")]
+    NoValidInterface,
 }
 
 /// Holds handles related to a registered OSC service.
@@ -60,6 +62,8 @@ pub enum ServiceType {
 pub struct VRChatOSC {
     /// Socket for sending OSC messages.
     send_socket: UdpSocket,
+    /// The destination IP address for OSC messages (VRChat's IP address).
+    osc_ip: Arc<RwLock<IpAddr>>,
     /// mDNS client instance for service discovery.
     mdns: mdns::Mdns,
     /// Stores registered service handles, mapping service name to its handle.
@@ -69,17 +73,81 @@ pub struct VRChatOSC {
         Arc<RwLock<Option<Arc<dyn Fn(ServiceType) + Send + Sync + 'static>>>>,
 }
 
+/// Finds a non-loopback IPv4 interface address that is up.
+///
+/// This function enumerates network interfaces and selects one that is:
+/// - IPv4
+/// - Not a loopback address
+/// - In an "up" state
+///
+/// # Returns
+/// A non-loopback IPv4 address, or None if no suitable interface is found.
+fn find_non_loopback_ipv4() -> Option<IpAddr> {
+    if let Ok(interfaces) = if_addrs::get_if_addrs() {
+        for iface in interfaces {
+            if let std::net::IpAddr::V4(ipv4) = iface.addr.ip() {
+                if !ipv4.is_loopback() {
+                    return Some(IpAddr::V4(ipv4));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Finds the local IP address that can reach the given destination IP.
+///
+/// This function connects a temporary UDP socket to the destination to let the
+/// OS routing table determine the appropriate interface, then returns the local address.
+///
+/// # Arguments
+/// * `dest_ip` - The destination IP address to reach.
+///
+/// # Returns
+/// The local IP address on the interface that can reach the destination.
+fn find_local_ip_for_destination(dest_ip: IpAddr) -> Result<IpAddr, Error> {
+    // If the destination IP is a loopback address, return it directly.
+    if dest_ip.is_loopback() {
+        return Ok(dest_ip);
+    }
+
+    // Create a UDP socket and connect to the destination (without sending data).
+    // The OS will determine the correct interface based on routing table.
+    let socket = match dest_ip {
+        IpAddr::V4(_) => std::net::UdpSocket::bind("0.0.0.0:0")?,
+        IpAddr::V6(_) => std::net::UdpSocket::bind("[::]:0")?,
+    };
+
+    socket.connect((dest_ip, 0))?;
+    Ok(socket.local_addr()?.ip())
+}
+
 impl VRChatOSC {
     /// Creates a new `VRChatOSC` instance.
     /// Initializes mDNS, sets up service discovery, and starts a listener task for mDNS service notifications.
-    pub async fn new() -> Result<Arc<VRChatOSC>, Error> {
+    ///
+    /// # Arguments
+    /// * `osc_ip` - Optional IP address serves as the destination for OSC messages. When `None`,
+    ///   automatically selects a non-loopback IPv4 interface that is up. If no such interface is found,
+    ///   returns an error. Specifying this is necessary to restrict mDNS announcements
+    ///   to a single network interface, addressing a VRChat implementation issue where advertising on
+    ///   multiple interfaces leads to duplicate service discovery.
+    pub async fn new(osc_ip: Option<IpAddr>) -> Result<Arc<VRChatOSC>, Error> {
+        let osc_ip = match osc_ip {
+            Some(ip) => ip,
+            None => find_non_loopback_ipv4().ok_or(Error::NoValidInterface)?,
+        };
         let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)).await?;
 
         // Create an mpsc channel for notifying about discovered mDNS services.
         let (discover_notifier_tx, mut discover_notifier_rx) = mpsc::channel(8);
 
-        // Initialize the mDNS client, passing the sender part of the notification channel.
-        let mdns_client = mdns::Mdns::new(discover_notifier_tx).await?;
+        // Derive the advertised IP (our local interface IP) from the OSC destination IP.
+        // This finds the local IP address on the same network as the destination.
+        let advertised_ip = find_local_ip_for_destination(osc_ip)?;
+
+        // Initialize the mDNS client with our local interface IP for announcements.
+        let mdns_client = mdns::Mdns::new(discover_notifier_tx, advertised_ip).await?;
 
         // Start following OSC services and OSCQuery JSON services on the local network.
         let _ = mdns_client
@@ -116,10 +184,30 @@ impl VRChatOSC {
 
         Ok(Arc::new(VRChatOSC {
             send_socket: socket,
+            osc_ip: Arc::new(RwLock::new(osc_ip)),
             mdns: mdns_client,
             service_handles: Arc::new(RwLock::new(HashMap::new())),
             on_service_discovered_callback,
         }))
+    }
+
+    /// Sets the OSC destination IP address (VRChat's IP) and updates mDNS advertising accordingly.
+    ///
+    /// This changes the destination IP for OSC communication and derives the local
+    /// interface IP to advertise via mDNS based on the new destination.
+    ///
+    /// # Arguments
+    /// * `ip` - The new destination IP address (VRChat's IP).
+    pub async fn set_osc_ip(&self, ip: IpAddr) -> Result<(), Error> {
+        *self.osc_ip.write().await = ip;
+        let advertised_ip = find_local_ip_for_destination(ip)?;
+        self.mdns.set_advertised_ip(advertised_ip).await;
+        Ok(())
+    }
+
+    /// Gets the currently configured OSC destination IP address (VRChat's IP).
+    pub async fn get_osc_ip(&self) -> IpAddr {
+        *self.osc_ip.read().await
     }
 
     /// Registers a callback function to be invoked when an mDNS service is discovered.

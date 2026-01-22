@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::Arc,
 };
 
@@ -12,9 +12,9 @@ use hickory_proto::{
 use socket_pktinfo::{AsyncPktInfoUdpSocket, PktInfo};
 use tokio::sync::{mpsc, RwLock};
 
-use crate::mdns::{if_monitor::IfMonitor, utils::send_to_mdns};
+use crate::mdns::{MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT};
 
-use super::utils::{create_mdns_response_message, extract_service_info, resolve_interface_ip};
+use super::utils::{create_mdns_response_message, extract_service_info};
 
 /// Size of the buffer used for receiving UDP packets. 4KB is a common size.
 const BUFFER_SIZE: usize = 4096;
@@ -36,14 +36,14 @@ const BUFFER_SIZE: usize = 4096;
 ///   discovered services from responses.
 /// * `follow_services` - An `Arc<RwLock<...>>` containing the set of service types this
 ///   instance is actively interested in.
-/// * `if_monitor` - An `Arc<IfMonitor>` to monitor network interface changes.
+/// * `advertised_ip` - The IP address to advertise in mDNS responses.
 pub async fn server_task(
     socket: Arc<AsyncPktInfoUdpSocket>,
     notifier_tx: mpsc::Sender<(Name, SocketAddr)>,
     registered_services: Arc<RwLock<HashMap<Name, HashMap<Name, u16>>>>,
     service_cache: Arc<RwLock<HashMap<Name, SocketAddr>>>,
     follow_services: Arc<RwLock<HashSet<Name>>>,
-    if_monitor: Arc<IfMonitor>,
+    advertised_ip: Arc<RwLock<IpAddr>>,
 ) {
     let mut buf = [0u8; BUFFER_SIZE]; // Initialize buffer
 
@@ -105,8 +105,8 @@ pub async fn server_task(
                     message,
                     &socket,
                     &registered_services,
+                    &advertised_ip,
                     &pkt_info,
-                    &if_monitor,
                 )
                 .await;
             }
@@ -135,19 +135,17 @@ pub async fn server_task(
 /// * `query_message` - The parsed `Message` object representing the mDNS query.
 /// * `socket` - The `AsyncPktInfoUdpSocket` to send responses from.
 /// * `registered_services` - Read-only access to the map of locally registered services.
-/// * `pkt_info` - Packet information including destination address and interface index.
-/// * `if_monitor` - An `Arc<IfMonitor>` to monitor network interface changes.
+/// * `advertised_ip` - The IP address to use in response records.
+/// * `pkt_info` - Packet information for unicast response handling.
 async fn handle_query(
     query_message: Message,
     socket: &AsyncPktInfoUdpSocket,
     registered_services: &Arc<RwLock<HashMap<Name, HashMap<Name, u16>>>>,
+    advertised_ip: &Arc<RwLock<IpAddr>>,
     pkt_info: &PktInfo,
-    if_monitor: &Arc<IfMonitor>,
 ) {
-    // Determine the local IP address for the interface that received the query.
-    // Use the socket's family to prefer IPv4 or IPv6 accordingly.
-    let prefer_ipv6 = socket.local_addr().map(|a| a.is_ipv6()).unwrap_or(false);
-    let interface_ip = resolve_interface_ip(pkt_info, if_monitor, prefer_ipv6).await;
+    // Use the configured advertised IP address for responses.
+    let interface_ip = *advertised_ip.read().await;
 
     // Iterate over each query in the mDNS message.
     for query in query_message.queries() {
@@ -193,7 +191,16 @@ async fn handle_query(
                                     );
                                 }
                             } else {
-                                if let Err(e) = send_to_mdns(socket, &bytes, if_monitor).await {
+                                // Determine multicast address based on IP family
+                                let multicast_addr: SocketAddr = match interface_ip {
+                                    IpAddr::V4(_) => {
+                                        SocketAddr::new(IpAddr::V4(MDNS_IPV4_ADDR), MDNS_PORT)
+                                    }
+                                    IpAddr::V6(_) => {
+                                        SocketAddr::new(IpAddr::V6(MDNS_IPV6_ADDR), MDNS_PORT)
+                                    }
+                                };
+                                if let Err(e) = socket.send_to(&bytes, multicast_addr).await {
                                     log::error!(
                                         "Failed to send multicast response for instance {}: {}",
                                         instance_name,
@@ -234,11 +241,8 @@ async fn handle_query(
                         port
                     );
 
-                    let response_message = create_mdns_response_message(
-                        registered_instance_name,
-                        interface_ip,
-                        port,
-                    );
+                    let response_message =
+                        create_mdns_response_message(registered_instance_name, interface_ip, port);
                     let bytes = response_message.to_bytes();
                     match bytes {
                         Ok(bytes) => {
@@ -252,7 +256,16 @@ async fn handle_query(
                                     );
                                 }
                             } else {
-                                if let Err(e) = send_to_mdns(socket, &bytes, if_monitor).await {
+                                // Determine multicast address based on IP family
+                                let multicast_addr: SocketAddr = match interface_ip {
+                                    IpAddr::V4(_) => {
+                                        SocketAddr::new(IpAddr::V4(MDNS_IPV4_ADDR), MDNS_PORT)
+                                    }
+                                    IpAddr::V6(_) => {
+                                        SocketAddr::new(IpAddr::V6(MDNS_IPV6_ADDR), MDNS_PORT)
+                                    }
+                                };
+                                if let Err(e) = socket.send_to(&bytes, multicast_addr).await {
                                     log::error!(
                                         "Failed to send multicast response for instance {}: {}",
                                         registered_instance_name,
@@ -370,4 +383,3 @@ async fn handle_response(
         log::trace!("Response message did not contain complete service info or was not a service announcement.");
     }
 }
-
