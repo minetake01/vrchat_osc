@@ -25,6 +25,16 @@ However, due to VRChat's implementation choices (reliance on mDNS for discovery 
 * (*1) VRChat relies on mDNS for discovery and cannot be manually configured to send to an arbitrary IP.
 * (*2) Functionality works (server is reachable), but VRChat will not discover it via mDNS in this environment.
 
+## Supported Platforms
+
+This crate is cross-platform and supports the following operating systems:
+
+| Platform | Support | Notes |
+| :--- | :---: | :--- |
+| **Windows** | ✅ | Native support. |
+| **Linux** | ✅ | Native support. |
+| **MacOS** | ✅ | VRChat does not run natively. **LAN** limitations apply when connecting to VRChat on another device. |
+
 ## Key Features
 
 * **OSC Communication**: Easily send and receive OSC messages with the VRChat client.
