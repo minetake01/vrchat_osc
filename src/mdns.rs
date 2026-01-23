@@ -13,9 +13,10 @@ use hickory_proto::{
     rr::{Name, RecordType},
     serialize::binary::BinEncodable,
 };
-use socket_pktinfo::AsyncPktInfoUdpSocket;
+
 use task::server_task;
 use tokio::{
+    net::UdpSocket,
     sync::{mpsc, RwLock},
     task::JoinHandle,
 };
@@ -26,9 +27,6 @@ use crate::mdns::utils::{get_interface_index, setup_multicast_socket};
 const MDNS_PORT: u16 = 5353;
 const MDNS_IPV4_ADDR: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
 const MDNS_IPV6_ADDR: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xFB);
-
-/// Maximum number of attempts to send a multicast message.
-const MAX_SEND_ATTEMPTS: usize = 3;
 
 /// Error types that can occur during mDNS operations.
 #[derive(thiserror::Error, Debug)]
@@ -46,7 +44,7 @@ pub enum Error {
 /// using a single advertised IP address.
 pub struct Mdns {
     /// The UDP socket for mDNS operations, matching the advertised IP family.
-    socket: Arc<AsyncPktInfoUdpSocket>,
+    socket: Arc<UdpSocket>,
 
     /// Handle to the background task processing mDNS messages.
     task_handle: JoinHandle<()>,
@@ -96,8 +94,7 @@ impl Mdns {
         let follow_services = Arc::new(RwLock::new(HashSet::new()));
 
         // Get interface addresses for multicast group join
-        let if_addrs = if_addrs::get_if_addrs()?;
-        let socket = setup_multicast_socket(&if_addrs, advertised_ip_val).await?;
+        let socket = setup_multicast_socket(advertised_ip_val).await?;
 
         log::debug!(
             "Successfully bound to multicast socket: {:?}",
@@ -138,7 +135,8 @@ impl Mdns {
         // Update the multicast interface
         match ip {
             IpAddr::V4(ipv4) => {
-                if let Err(e) = self.socket.set_multicast_if_v4(&ipv4) {
+                let sock_ref = socket2::SockRef::from(&self.socket);
+                if let Err(e) = sock_ref.set_multicast_if_v4(&ipv4) {
                     log::error!("Failed to set multicast IPv4 interface to {}: {}", ipv4, e);
                 } else {
                     log::debug!("Set multicast IPv4 interface to {}", ipv4);
@@ -148,7 +146,8 @@ impl Mdns {
                 // Get current interface addresses for IPv6 interface lookup
                 if let Ok(if_addrs) = if_addrs::get_if_addrs() {
                     let if_index = get_interface_index(&ip, &if_addrs).unwrap_or(0);
-                    if let Err(e) = self.socket.set_multicast_if_v6(if_index) {
+                    let sock_ref = socket2::SockRef::from(&self.socket);
+                    if let Err(e) = sock_ref.set_multicast_if_v6(if_index) {
                         log::error!(
                             "Failed to set multicast IPv6 interface to index {}: {}",
                             if_index,
@@ -200,21 +199,15 @@ impl Mdns {
         let socket = self.socket.clone();
         let advertised_ip = self.advertised_ip.clone();
 
-        tokio::spawn(async move {
-            for _ in 0..MAX_SEND_ATTEMPTS {
-                if let Err(e) =
-                    send_mdns_announcement(&socket, &instance_name, port, &advertised_ip).await
-                {
-                    log::error!(
-                        "Failed to send registration announcement for {} via {:?}: {}",
-                        instance_name,
-                        socket.local_addr().ok(),
-                        e
-                    );
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-        });
+        if let Err(e) = send_mdns_announcement(&socket, &instance_name, port, &advertised_ip).await
+        {
+            log::error!(
+                "Failed to send registration announcement for {} via {:?}: {}",
+                instance_name,
+                socket.local_addr().ok(),
+                e
+            );
+        }
         Ok(())
     }
 

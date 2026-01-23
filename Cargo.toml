@@ -3,15 +3,8 @@ name = "vrchat_osc"
 description = "vrchat_osc is a Rust crate designed to easily utilize VRChat's OSC (Open Sound Control) and OSCQuery protocols."
 repository = "https://github.com/minetake01/vrchat_osc"
 readme = "README.md"
-keywords = [
-    "vrchat",
-    "osc",
-    "oscquery",
-]
-categories = [
-    "asynchronous",
-    "network-programming",
-]
+keywords = ["vrchat", "osc", "oscquery"]
+categories = ["asynchronous", "network-programming"]
 version = "1.3.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -33,7 +26,6 @@ convert_case = "0.7"
 wildmatch = "2.4.0"
 socket2 = "0.6"
 if-addrs = "0.14"
-socket-pktinfo = { git = "https://github.com/minetake01/socket-pktinfo.git", branch = "tokio-support", features = ["tokio"] }
 
 [dev-dependencies]
 env_logger = "0.11"

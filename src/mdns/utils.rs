@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use tokio::sync::RwLock;
+use tokio::{net::UdpSocket, sync::RwLock};
 
 use hickory_proto::{
     op::{Message, MessageType, OpCode},
@@ -13,7 +13,6 @@ use hickory_proto::{
     },
     serialize::binary::BinEncodable,
 };
-use socket_pktinfo::AsyncPktInfoUdpSocket;
 
 use crate::mdns::{MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT};
 
@@ -56,9 +55,8 @@ pub fn get_interface_index(ip: &IpAddr, if_addrs: &[if_addrs::Interface]) -> Opt
 /// # Returns
 /// A `Result` containing an `Arc<AsyncPktInfoUdpSocket>` if successful.
 pub async fn setup_multicast_socket(
-    if_addrs: &[if_addrs::Interface],
     advertised_ip: IpAddr,
-) -> Result<Arc<AsyncPktInfoUdpSocket>, std::io::Error> {
+) -> Result<Arc<UdpSocket>, std::io::Error> {
     match advertised_ip {
         IpAddr::V4(ipv4) => {
             let socket = socket2::Socket::new(
@@ -80,7 +78,8 @@ pub async fn setup_multicast_socket(
             socket.set_multicast_if_v4(&ipv4)?;
             log::debug!("Set multicast IPv4 interface to {}", ipv4);
 
-            Ok(Arc::new(AsyncPktInfoUdpSocket::from_std(socket.into())?))
+            let socket = std::net::UdpSocket::from(socket);
+            Ok(Arc::new(UdpSocket::from_std(socket)?))
         }
         IpAddr::V6(ipv6) => {
             let socket = socket2::Socket::new(
@@ -95,7 +94,9 @@ pub async fn setup_multicast_socket(
             socket.set_multicast_loop_v6(true)?;
 
             // Find the interface index for the advertised IPv6 address
-            let if_index = get_interface_index(&advertised_ip, if_addrs).unwrap_or(0);
+            let if_addrs = if_addrs::get_if_addrs()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            let if_index = get_interface_index(&advertised_ip, &if_addrs).unwrap_or(0);
             socket.join_multicast_v6(&MDNS_IPV6_ADDR, if_index)?;
             log::debug!(
                 "Joined mDNS IPv6 multicast group on interface {} with index {}",
@@ -107,7 +108,8 @@ pub async fn setup_multicast_socket(
             socket.set_multicast_if_v6(if_index)?;
             log::debug!("Set multicast IPv6 interface to index {}", if_index);
 
-            Ok(Arc::new(AsyncPktInfoUdpSocket::from_std(socket.into())?))
+            let socket = std::net::UdpSocket::from(socket);
+            Ok(Arc::new(UdpSocket::from_std(socket)?))
         }
     }
 }
@@ -126,7 +128,7 @@ pub async fn setup_multicast_socket(
 /// # Returns
 /// A `Result` containing the number of bytes sent, or an error if sending fails.
 pub async fn send_mdns_announcement(
-    socket: &AsyncPktInfoUdpSocket,
+    socket: &UdpSocket,
     instance_name: &Name,
     port: u16,
     advertised_ip: &Arc<RwLock<IpAddr>>,

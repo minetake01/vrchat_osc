@@ -9,8 +9,10 @@ use hickory_proto::{
     rr::{Name, RecordType},
     serialize::binary::{BinDecodable, BinEncodable},
 };
-use socket_pktinfo::{AsyncPktInfoUdpSocket, PktInfo};
-use tokio::sync::{mpsc, RwLock};
+use tokio::{
+    net::UdpSocket,
+    sync::{mpsc, RwLock},
+};
 
 use crate::mdns::{MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT};
 
@@ -38,7 +40,7 @@ const BUFFER_SIZE: usize = 4096;
 ///   instance is actively interested in.
 /// * `advertised_ip` - The IP address to advertise in mDNS responses.
 pub async fn server_task(
-    socket: Arc<AsyncPktInfoUdpSocket>,
+    socket: Arc<UdpSocket>,
     notifier_tx: mpsc::Sender<(Name, SocketAddr)>,
     registered_services: Arc<RwLock<HashMap<Name, HashMap<Name, u16>>>>,
     service_cache: Arc<RwLock<HashMap<Name, SocketAddr>>>,
@@ -49,7 +51,7 @@ pub async fn server_task(
 
     loop {
         // Attempt to receive data from the UDP socket with sender address.
-        let (len, pkt_info) = match socket.recv(&mut buf).await {
+        let (len, src_addr) = match socket.recv_from(&mut buf).await {
             Ok(v) => v,
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::ConnectionReset
@@ -81,7 +83,7 @@ pub async fn server_task(
                 log::warn!(
                     "Failed to parse mDNS message from bytes ({} bytes received) from {}: {}",
                     len,
-                    pkt_info.addr_src,
+                    src_addr,
                     e
                 );
                 continue;
@@ -106,7 +108,7 @@ pub async fn server_task(
                     &socket,
                     &registered_services,
                     &advertised_ip,
-                    &pkt_info,
+                    src_addr,
                 )
                 .await;
             }
@@ -139,10 +141,10 @@ pub async fn server_task(
 /// * `pkt_info` - Packet information for unicast response handling.
 async fn handle_query(
     query_message: Message,
-    socket: &AsyncPktInfoUdpSocket,
+    socket: &UdpSocket,
     registered_services: &Arc<RwLock<HashMap<Name, HashMap<Name, u16>>>>,
     advertised_ip: &Arc<RwLock<IpAddr>>,
-    pkt_info: &PktInfo,
+    src_addr: SocketAddr,
 ) {
     // Use the configured advertised IP address for responses.
     let interface_ip = *advertised_ip.read().await;
@@ -183,7 +185,7 @@ async fn handle_query(
                         Ok(bytes) => {
                             // mDNS unicast response handling
                             if query.mdns_unicast_response {
-                                if let Err(e) = socket.send_to(&bytes, pkt_info.addr_src).await {
+                                if let Err(e) = socket.send_to(&bytes, src_addr).await {
                                     log::error!(
                                         "Failed to send response for instance {}: {}",
                                         instance_name,
@@ -248,7 +250,7 @@ async fn handle_query(
                         Ok(bytes) => {
                             // mDNS unicast response handling
                             if query.mdns_unicast_response {
-                                if let Err(e) = socket.send_to(&bytes, pkt_info.addr_src).await {
+                                if let Err(e) = socket.send_to(&bytes, src_addr).await {
                                     log::error!(
                                         "Failed to send response for instance {}: {}",
                                         registered_instance_name,
