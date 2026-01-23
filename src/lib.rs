@@ -111,6 +111,15 @@ fn find_local_ip_for_destination(dest_ip: IpAddr) -> Result<IpAddr, Error> {
         return Ok(dest_ip);
     }
 
+    // Check if the destination IP is one of our local interface addresses.
+    if let Ok(interfaces) = if_addrs::get_if_addrs() {
+        for iface in interfaces {
+            if iface.addr.ip() == dest_ip {
+                return Ok(dest_ip);
+            }
+        }
+    }
+
     // Create a UDP socket and connect to the destination (without sending data).
     // The OS will determine the correct interface based on routing table.
     let socket = match dest_ip {
