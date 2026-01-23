@@ -13,7 +13,7 @@ This results in VRChat's services being discoverable via mDNS, even though they 
 
 ### Workaround in This Crate
 
-[`VRChatOSC::new()`](file:///d:/Develop/Data/2025/First_half/0203vrchat_osc/vrchat_osc/src/lib.rs#L135-L192) accepts an `osc_ip` parameter (VRChat's IP address) and uses the [`find_local_ip_for_destination`](file:///d:/Develop/Data/2025/First_half/0203vrchat_osc/vrchat_osc/src/lib.rs#L108-L123) function to determine the local interface IP that can reach that destination.
+[`VRChatOSC::new()`](/src/lib.rs#L135-L192) accepts an `osc_ip` parameter (VRChat's IP address) and uses the [`find_local_ip_for_destination`](/src/lib.rs#L108-L123) function to determine the local interface IP that can reach that destination.
 
 ```rust
 // Let the OS routing table determine the appropriate interface
@@ -27,7 +27,7 @@ fn find_local_ip_for_destination(dest_ip: IpAddr) -> Result<IpAddr, Error> {
 }
 ```
 
-This `advertised_ip` is passed to the [mDNS module](file:///d:/Develop/Data/2025/First_half/0203vrchat_osc/vrchat_osc/src/mdns.rs#L150) to advertise the correct IP address in A/AAAA records.
+This `advertised_ip` is passed to the [mDNS module](/src/mdns.rs#L150) to advertise the correct IP address in A/AAAA records.
 
 ---
 
@@ -38,7 +38,7 @@ VRChat registers the IP address from the first A record in an mDNS response as a
 
 ### Workaround in This Crate
 
-The [`setup_multicast_socket`](file:///d:/Develop/Data/2025/First_half/0203vrchat_osc/vrchat_osc/src/mdns/utils.rs#L58-L113) function joins the multicast group and sets the multicast transmission interface for **only** the single `advertised_ip` interface.
+The [`setup_multicast_socket`](/src/mdns/utils.rs#L58-L113) function joins the multicast group and sets the multicast transmission interface for **only** the single `advertised_ip` interface.
 
 ```rust
 // For IPv4
@@ -61,7 +61,7 @@ VRChat does not recognize a service unless the mDNS response contains a PTR reco
 
 ### Workaround in This Crate
 
-The [`create_mdns_response_message`](file:///d:/Develop/Data/2025/First_half/0203vrchat_osc/vrchat_osc/src/mdns/utils.rs#L181-L234) function explicitly places the PTR record in the **Answers section**.
+The [`create_mdns_response_message`](/src/mdns/utils.rs#L181-L234) function explicitly places the PTR record in the **Answers section**.
 
 ```rust
 pub fn create_mdns_response_message(
@@ -91,4 +91,4 @@ pub fn create_mdns_response_message(
 }
 ```
 
-Similarly, the [`extract_service_info`](file:///d:/Develop/Data/2025/First_half/0203vrchat_osc/vrchat_osc/src/mdns/utils.rs#L247-L346) function requires a PTR record when parsing responses to extract service information.
+Similarly, the [`extract_service_info`](/src/mdns/utils.rs#L247-L346) function requires a PTR record when parsing responses to extract service information.
