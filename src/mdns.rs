@@ -5,7 +5,6 @@ use std::{
     collections::{HashMap, HashSet},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
-    time::Duration,
 };
 
 use hickory_proto::{
