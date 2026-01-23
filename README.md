@@ -5,9 +5,25 @@
 
 **`vrchat_osc` is a Rust crate designed to easily utilize VRChat's OSC (Open Sound Control) and OSCQuery protocols.**
 
-This crate aims to help VRChat tool developers efficiently perform operations such as manipulating avatar parameters, retrieving information, and providing custom OSC services. It integrates OSC message sending/receiving with service discovery via mDNS for OSCQuery.
+This crate is specifically designed to handle VRChat's unique network implementation behaviors, such as non-standard mDNS responses and binding specificities.
+For details on technical workarounds implemented in this crate, please refer to [WORKAROUNDS.md](./WORKAROUNDS.md).
 
-VRChat's OSCQuery implementation currently mandates a specific mDNS answer layout (a PTR record pointing to a service instance plus matching SRV and A/AAAA records for that instance). The helpers in `src/mdns/utils.rs` build and parse that exact structure, so the crate ignores other mDNS variants that would be needed for a general OSCQuery client. For that reason, the current implementation is limited to talking with VRChat-style services.
+## Supported Network Environments
+
+Most features work out-of-the-box on a local machine (Localhost) or within a standard Local Area Network (LAN) supporting multicast.
+However, due to VRChat's implementation choices (reliance on mDNS for discovery and loopback bindings), some features are limited in VPN or non-multicast environments.
+
+| Feature | Method | Localhost (Same PC) | LAN (Local Network) | VPN / Non-Multicast |
+| :--- | :--- | :---: | :---: | :---: |
+| **Send OSC** | `send()` (Auto-Discovery) | ✅ | ✅ | ❌ |
+| | `send_to_addr()` (Direct) | ✅ | ✅ | ✅ |
+| **Receive OSC** | `register()` (Bind 0.0.0.0) | ✅ | ✅ | ❌ (*1) |
+| **OSCQuery (Get)** | `get_parameter()` (Auto-Discovery) | ✅ | ❌ | ❌ |
+| | `get_parameter_from_addr()` (Direct) | ✅ | ❌ | ❌ |
+| **OSCQuery (Host)** | `register()` (Serve 0.0.0.0) | ✅ | ✅ | ✅ (*2) |
+
+* (*1) VRChat relies on mDNS for discovery and cannot be manually configured to send to an arbitrary IP.
+* (*2) Functionality works (server is reachable), but VRChat will not discover it via mDNS in this environment.
 
 ## Key Features
 
