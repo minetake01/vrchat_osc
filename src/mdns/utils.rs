@@ -78,6 +78,7 @@ pub async fn setup_multicast_socket(
             socket.set_multicast_if_v4(&ipv4)?;
             log::debug!("Set multicast IPv4 interface to {}", ipv4);
 
+            socket.set_nonblocking(true)?;
             let socket = std::net::UdpSocket::from(socket);
             Ok(Arc::new(UdpSocket::from_std(socket)?))
         }
@@ -108,6 +109,7 @@ pub async fn setup_multicast_socket(
             socket.set_multicast_if_v6(if_index)?;
             log::debug!("Set multicast IPv6 interface to index {}", if_index);
 
+            socket.set_nonblocking(true)?;
             let socket = std::net::UdpSocket::from(socket);
             Ok(Arc::new(UdpSocket::from_std(socket)?))
         }
