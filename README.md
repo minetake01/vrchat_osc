@@ -15,15 +15,16 @@ However, due to VRChat's implementation choices (reliance on mDNS for discovery 
 
 | Feature | Method | Localhost (Same PC) | LAN (Local Network) | VPN / Non-Multicast |
 | :--- | :--- | :---: | :---: | :---: |
-| **Send OSC** | `send()` (Auto-Discovery) | ✅ | ✅ | ❌ |
+| **Send OSC** | `send()` (Auto-Discovery) | ✅ | ✅ (*1) | ❌ |
 | | `send_to_addr()` (Direct) | ✅ | ✅ | ✅ |
-| **Receive OSC** | `register()` (Bind 0.0.0.0) | ✅ | ✅ | ❌ (*1) |
+| **Receive OSC** | `register()` (Bind 0.0.0.0) | ✅ | ✅ (*1) | ❌ (*2) |
 | **OSCQuery (Get)** | `get_parameter()` (Auto-Discovery) | ✅ | ❌ | ❌ |
 | | `get_parameter_from_addr()` (Direct) | ✅ | ❌ | ❌ |
-| **OSCQuery (Host)** | `register()` (Serve 0.0.0.0) | ✅ | ✅ | ✅ (*2) |
+| **OSCQuery (Host)** | `register()` (Serve 0.0.0.0) | ✅ | ✅ | ✅ (*3) |
 
-* (*1) VRChat relies on mDNS for discovery and cannot be manually configured to send to an arbitrary IP.
-* (*2) Functionality works (server is reachable), but VRChat will not discover it via mDNS in this environment.
+* (*1) In a LAN environment, it is necessary to explicitly specify the IP address to ensure correct connectivity.
+* (*2) VRChat relies on mDNS for discovery and cannot be manually configured to send to an arbitrary IP.
+* (*3) Functionality works (server is reachable), but VRChat will not discover it via mDNS in this environment.
 
 ## Supported Platforms
 
