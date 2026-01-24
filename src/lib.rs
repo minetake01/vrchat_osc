@@ -24,6 +24,8 @@ use tokio::{
 };
 use wildmatch::WildMatch;
 
+const OSC_PACKET_BUFFER_SIZE: usize = 65535; // Max UDP packet size
+
 /// Defines the possible errors that can occur within the VRChatOSC library.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
