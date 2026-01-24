@@ -13,8 +13,10 @@ async fn main() -> Result<(), Error> {
         .filter_level(log::LevelFilter::Debug)
         .init();
 
-    // Initialize VRChatOSC instance
-    let vrchat_osc = VRChatOSC::new().await?;
+    // Initialize VRChatOSC instance.
+    // When None is passed, automatically selects a non-loopback IPv4 interface.
+    // Pass Some(IpAddr) to advertise on a specific network interface
+    let vrchat_osc = VRChatOSC::new(None).await?;
 
     let cloned_vrchat_osc = vrchat_osc.clone();
     vrchat_osc

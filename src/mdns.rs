@@ -1,4 +1,3 @@
-mod if_monitor;
 mod task;
 mod utils;
 
@@ -6,7 +5,6 @@ use std::{
     collections::{HashMap, HashSet},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::Arc,
-    time::Duration,
 };
 
 use hickory_proto::{
@@ -14,22 +12,20 @@ use hickory_proto::{
     rr::{Name, RecordType},
     serialize::binary::BinEncodable,
 };
-use socket_pktinfo::AsyncPktInfoUdpSocket;
+
 use task::server_task;
 use tokio::{
+    net::UdpSocket,
     sync::{mpsc, RwLock},
     task::JoinHandle,
 };
-use utils::{send_mdns_announcement, send_to_mdns};
+use utils::send_mdns_announcement;
 
-use crate::mdns::utils::setup_multicast_socket;
+use crate::mdns::utils::{get_interface_index, setup_multicast_socket};
 
 const MDNS_PORT: u16 = 5353;
 const MDNS_IPV4_ADDR: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
 const MDNS_IPV6_ADDR: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xFB);
-
-/// Maximum number of attempts to send a multicast message.
-const MAX_SEND_ATTEMPTS: usize = 3;
 
 /// Error types that can occur during mDNS operations.
 #[derive(thiserror::Error, Debug)]
@@ -43,21 +39,18 @@ pub enum Error {
     AnySocketBindError,
 }
 
-/// Represents a task associated with a UDP socket for mDNS operations.
-struct MdnsTask {
-    socket: Arc<AsyncPktInfoUdpSocket>,
-    handle: JoinHandle<()>,
-}
-
 /// Main structure for handling mDNS service discovery and advertisement
-/// across all available network interfaces.
+/// using a single advertised IP address.
 pub struct Mdns {
-    /// List of active mDNS tasks, typically one for IPv4 and one for IPv6,
-    /// each operating on all relevant interfaces.
-    tasks: Vec<MdnsTask>,
+    /// The UDP socket for mDNS operations, matching the advertised IP family.
+    socket: Arc<UdpSocket>,
 
-    /// Network interface monitor to track interface changes.
-    if_monitor: Arc<if_monitor::IfMonitor>,
+    /// Handle to the background task processing mDNS messages.
+    task_handle: JoinHandle<()>,
+
+    /// The IP address to advertise in mDNS responses.
+    /// Only the interface matching this IP will be used for announcements.
+    advertised_ip: Arc<RwLock<IpAddr>>,
 
     /// A map of registered services.
     /// The first key is the service type name (e.g., `_oscjson._tcp.local.`).
@@ -74,119 +67,114 @@ pub struct Mdns {
 }
 
 impl Mdns {
-    /// Creates a new mDNS instance that operates on all available network interfaces.
+    /// Creates a new mDNS instance that operates using the specified advertised IP.
     ///
-    /// This function attempts to bind UDP sockets to wildcard addresses for IPv4 (`0.0.0.0`)
-    /// and IPv6 (`[::]`) to listen for and send mDNS packets across all relevant interfaces.
-    /// Background tasks are spawned for each successfully bound socket (typically one for IPv4, one for IPv6).
+    /// This function binds a UDP socket to a wildcard address for the IP family
+    /// matching the advertised IP. Announcements and responses are sent only via
+    /// the interface matching the advertised IP.
     ///
     /// # Arguments
     /// * `notifier_tx` - An `mpsc::Sender` to send notifications of discovered services.
+    /// * `advertised_ip` - The IP address to advertise in mDNS responses. This address serves as the
+    ///   destination for OSC messages. Specifying this is necessary to use only the interface matching
+    ///   this IP for service announcements and query responses, avoiding duplicate service discovery
+    ///   issues in VRChat.
     ///
     /// # Returns
     /// A `Result` containing the new `Mdns` instance or an `Error` if initialization fails
     /// (e.g., if no sockets could be bound).
-    pub async fn new(notifier_tx: mpsc::Sender<(Name, SocketAddr)>) -> Result<Self, Error> {
+    pub async fn new(
+        notifier_tx: mpsc::Sender<(Name, SocketAddr)>,
+        advertised_ip_val: IpAddr,
+    ) -> Result<Self, Error> {
+        let advertised_ip = Arc::new(RwLock::new(advertised_ip_val));
         let registered_services = Arc::new(RwLock::new(HashMap::new()));
         let service_cache = Arc::new(RwLock::new(HashMap::new()));
         let follow_services = Arc::new(RwLock::new(HashSet::new()));
-        let mut tasks = Vec::new();
 
-        // Attempt to bind a UDP socket for multicast
-        let if_monitor = if_monitor::IfMonitor::new()?;
-        let if_addrs = if_monitor.get_interfaces().await;
-        let sockets = setup_multicast_socket(if_addrs).await?;
+        // Get interface addresses for multicast group join
+        let socket = setup_multicast_socket(advertised_ip_val).await?;
 
-        let if_monitor = Arc::new(if_monitor);
+        log::debug!(
+            "Successfully bound to multicast socket: {:?}",
+            socket.local_addr()
+        );
 
-        let sockets_clone = sockets.clone();
-        if_monitor.on_added(move |iface| match iface.ip() {
-            IpAddr::V4(ip) => {
-                if let Err(e) = sockets_clone[0].join_multicast_v4(&MDNS_IPV4_ADDR, &ip) {
-                    log::warn!(
-                        "Failed to join IPv4 mDNS multicast group {} on interface {}: {}",
-                        MDNS_IPV4_ADDR,
-                        ip,
-                        e
-                    );
-                }
-            }
-            IpAddr::V6(_) => {
-                let Some(if_index) = iface.index else {
-                    return;
-                };
-                if let Err(e) = sockets_clone[1].join_multicast_v6(&MDNS_IPV6_ADDR, if_index) {
-                    log::warn!(
-                        "Failed to join IPv6 mDNS multicast group {} on interface index {}: {}",
-                        MDNS_IPV6_ADDR,
-                        if_index,
-                        e
-                    );
-                }
-            }
-        });
-        let sockets_clone = sockets.clone();
-        if_monitor.on_removed(move |iface| match iface.ip() {
-            IpAddr::V4(ip) => {
-                if let Err(e) = sockets_clone[0].leave_multicast_v4(&MDNS_IPV4_ADDR, &ip) {
-                    log::warn!(
-                        "Failed to leave IPv4 mDNS multicast group {} on interface {}: {}",
-                        MDNS_IPV4_ADDR,
-                        ip,
-                        e
-                    );
-                }
-            }
-            IpAddr::V6(_) => {
-                let Some(if_index) = iface.index else {
-                    return;
-                };
-                if let Err(e) = sockets_clone[1].leave_multicast_v6(&MDNS_IPV6_ADDR, if_index) {
-                    log::warn!(
-                        "Failed to leave IPv6 mDNS multicast group {} on interface index {}: {}",
-                        MDNS_IPV6_ADDR,
-                        if_index,
-                        e
-                    );
-                }
-            }
-        });
-
-        for socket in sockets {
-            log::debug!(
-                "Successfully bound to multicast socket: {:?}",
-                socket.local_addr()
-            );
-            tasks.push(MdnsTask {
-                socket: socket.clone(),
-                handle: tokio::spawn(server_task(
-                    socket,
-                    notifier_tx.clone(),
-                    registered_services.clone(),
-                    service_cache.clone(),
-                    follow_services.clone(),
-                    if_monitor.clone(),
-                )),
-            });
-        }
-
-        if tasks.is_empty() {
-            return Err(Error::AnySocketBindError);
-        }
+        let task_handle = tokio::spawn(server_task(
+            socket.clone(),
+            notifier_tx,
+            registered_services.clone(),
+            service_cache.clone(),
+            follow_services.clone(),
+            advertised_ip.clone(),
+        ));
 
         Ok(Mdns {
-            tasks,
-            if_monitor,
+            socket,
+            task_handle,
+            advertised_ip,
             registered_services,
             service_cache,
             follow_services,
         })
     }
 
+    /// Sets the advertised IP address for mDNS responses.
+    ///
+    /// This changes the IP address that will be included in A/AAAA records
+    /// when responding to mDNS queries. Also updates the multicast interface.
+    ///
+    /// # Arguments
+    /// * `ip` - The new IP address to advertise.
+    ///
+    /// # Note
+    /// The new IP must be of the same family (IPv4/IPv6) as the original.
+    /// Changing between IPv4 and IPv6 is not supported.
+    pub async fn set_advertised_ip(&self, ip: IpAddr) {
+        // Update the multicast interface
+        match ip {
+            IpAddr::V4(ipv4) => {
+                let sock_ref = socket2::SockRef::from(&self.socket);
+                if let Err(e) = sock_ref.set_multicast_if_v4(&ipv4) {
+                    log::error!("Failed to set multicast IPv4 interface to {}: {}", ipv4, e);
+                } else {
+                    log::debug!("Set multicast IPv4 interface to {}", ipv4);
+                }
+            }
+            IpAddr::V6(_) => {
+                // Get current interface addresses for IPv6 interface lookup
+                if let Ok(if_addrs) = if_addrs::get_if_addrs() {
+                    let if_index = get_interface_index(&ip, &if_addrs).unwrap_or(0);
+                    let sock_ref = socket2::SockRef::from(&self.socket);
+                    if let Err(e) = sock_ref.set_multicast_if_v6(if_index) {
+                        log::error!(
+                            "Failed to set multicast IPv6 interface to index {}: {}",
+                            if_index,
+                            e
+                        );
+                    } else {
+                        log::debug!("Set multicast IPv6 interface to index {}", if_index);
+                    }
+                } else {
+                    log::error!("Failed to get interface addresses for IPv6 multicast setup");
+                }
+            }
+        }
+
+        let mut guard = self.advertised_ip.write().await;
+        *guard = ip;
+        log::info!("Updated advertised IP to: {}", ip);
+    }
+
+    /// Gets the currently advertised IP address.
+    pub async fn get_advertised_ip(&self) -> IpAddr {
+        *self.advertised_ip.read().await
+    }
+
     /// Registers a service with mDNS.
     ///
     /// This adds the service to an internal registry and advertises it on the network
-    /// across all active interfaces (via the wildcard-bound sockets). The service is identified
+    /// using the configured advertised IP address. The service is identified
     /// by its instance name and its port number.
     ///
     /// # Arguments
@@ -206,21 +194,18 @@ impl Mdns {
 
         log::info!("Registered service: {} at {}", instance_name, port);
 
-        for _ in 0..MAX_SEND_ATTEMPTS {
-            for task in &self.tasks {
-                if let Err(e) =
-                    send_mdns_announcement(&task.socket, &instance_name, port, &self.if_monitor)
-                        .await
-                {
-                    log::error!(
-                        "Failed to send registration announcement for {} via {:?}: {}",
-                        instance_name,
-                        task.socket.local_addr().ok(),
-                        e
-                    );
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
+        // Clone necessary data before spawning to satisfy 'static lifetime requirement
+        let socket = self.socket.clone();
+        let advertised_ip = self.advertised_ip.clone();
+
+        if let Err(e) = send_mdns_announcement(&socket, &instance_name, port, &advertised_ip).await
+        {
+            log::error!(
+                "Failed to send registration announcement for {} via {:?}: {}",
+                instance_name,
+                socket.local_addr().ok(),
+                e
+            );
         }
         Ok(())
     }
@@ -264,7 +249,7 @@ impl Mdns {
     }
 
     /// Starts following a specific service type.
-    /// Queries for this service type will be sent out on all active interfaces.
+    /// Queries for this service type will be sent out on the active interface.
     ///
     /// # Arguments
     /// * `service_type_name` - The name of the service type to follow.
@@ -286,15 +271,20 @@ impl Mdns {
         query_message.add_query(Query::query(service_type_name.clone(), RecordType::ANY));
         let bytes = query_message.to_bytes()?;
 
-        for task in self.tasks.iter() {
-            if let Err(e) = send_to_mdns(&task.socket, &bytes, &self.if_monitor).await {
-                log::error!(
-                    "Failed to send follow query for {} via {:?}: {}",
-                    service_type_name,
-                    task.socket.local_addr().ok(),
-                    e
-                );
-            }
+        // Determine multicast address based on advertised IP family
+        let ip = *self.advertised_ip.read().await;
+        let multicast_addr: SocketAddr = match ip {
+            IpAddr::V4(_) => SocketAddr::new(IpAddr::V4(MDNS_IPV4_ADDR), MDNS_PORT),
+            IpAddr::V6(_) => SocketAddr::new(IpAddr::V6(MDNS_IPV6_ADDR), MDNS_PORT),
+        };
+
+        if let Err(e) = self.socket.send_to(&bytes, multicast_addr).await {
+            log::error!(
+                "Failed to send follow query for {} via {:?}: {}",
+                service_type_name,
+                self.socket.local_addr().ok(),
+                e
+            );
         }
         Ok(())
     }
@@ -352,9 +342,7 @@ impl Mdns {
 
 impl Drop for Mdns {
     fn drop(&mut self) {
-        for task in &mut self.tasks {
-            task.handle.abort();
-        }
-        log::debug!("All mDNS tasks have been cleaned up.");
+        self.task_handle.abort();
+        log::debug!("mDNS task has been cleaned up.");
     }
 }

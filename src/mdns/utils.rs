@@ -1,8 +1,9 @@
 use std::{
-    collections::HashSet,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     sync::Arc,
 };
+
+use tokio::{net::UdpSocket, sync::RwLock};
 
 use hickory_proto::{
     op::{Message, MessageType, OpCode},
@@ -12,250 +13,157 @@ use hickory_proto::{
     },
     serialize::binary::BinEncodable,
 };
-use socket_pktinfo::{AsyncPktInfoUdpSocket, PktInfo};
 
-use crate::mdns::{if_monitor::IfMonitor, MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT};
+use crate::mdns::{MDNS_IPV4_ADDR, MDNS_IPV6_ADDR, MDNS_PORT};
 
 /// TTL (Time to Live) for mDNS records in seconds.
 const RECORD_TTL: u32 = 120;
 
-/// Sets up IPv4 and IPv6 multicast sockets for mDNS.
-///
-/// This function creates UDP sockets, configures them for address reuse,
-/// binds them to the mDNS port on wildcard addresses, and joins the
-/// mDNS multicast groups on all provided network interfaces.
+/// Gets the interface index for a given IP address using if_addrs.
 ///
 /// # Arguments
-/// * `if_addrs` - A vector of network interfaces to join multicast groups on.
+/// * `ip` - The IP address to look up.
+/// * `if_addrs` - A slice of network interfaces to search.
 ///
 /// # Returns
-/// A `Result` containing an array of two `Arc<AsyncPktInfoUdpSocket>`s (IPv4 and IPv6) if successful.
-pub async fn setup_multicast_socket(
-    if_addrs: Vec<if_addrs::Interface>,
-) -> Result<[Arc<AsyncPktInfoUdpSocket>; 2], std::io::Error> {
-    let socket_v4 = socket2::Socket::new(
-        socket2::Domain::IPV4,
-        socket2::Type::DGRAM,
-        Some(socket2::Protocol::UDP),
-    )?;
-    let socket_v6 = socket2::Socket::new(
-        socket2::Domain::IPV6,
-        socket2::Type::DGRAM,
-        Some(socket2::Protocol::UDP),
-    )?;
-
-    for socket in [&socket_v4, &socket_v6] {
-        socket.set_reuse_address(true)?;
-        #[cfg(target_family = "unix")]
-        socket.set_reuse_port(true)?;
-    }
-
-    socket_v4.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, MDNS_PORT).into())?;
-    socket_v6.bind(&SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, MDNS_PORT, 0, 0).into())?;
-
-    socket_v4.set_multicast_loop_v4(true)?;
-    socket_v6.set_multicast_loop_v6(true)?;
-
-    let mut joined_ifindexes = HashSet::new();
-    for if_addr in if_addrs.iter() {
-        match &if_addr.addr {
-            if_addrs::IfAddr::V4(ifv4) => {
-                socket_v4.join_multicast_v4(&MDNS_IPV4_ADDR, &ifv4.ip)?;
-                log::debug!(
-                    "Joined mDNS IPv4 multicast group on interface {} with address {}",
-                    if_addr.name,
-                    ifv4.ip
-                );
+/// An `Option<u32>` containing the interface index if found.
+pub fn get_interface_index(ip: &IpAddr, if_addrs: &[if_addrs::Interface]) -> Option<u32> {
+    for iface in if_addrs {
+        match (&iface.addr, ip) {
+            (if_addrs::IfAddr::V4(v4), IpAddr::V4(target)) if v4.ip == *target => {
+                return iface.index;
             }
-            if_addrs::IfAddr::V6(_) => {
-                if let Some(if_index) = if_addr.index {
-                    if joined_ifindexes.insert(if_index) {
-                        socket_v6.join_multicast_v6(&MDNS_IPV6_ADDR, if_index)?;
-                        log::debug!(
-                            "Joined mDNS IPv6 multicast group on interface {} with index {}",
-                            if_addr.name,
-                            if_index
-                        );
-                    }
-                }
+            (if_addrs::IfAddr::V6(v6), IpAddr::V6(target)) if v6.ip == *target => {
+                return iface.index;
             }
+            _ => {}
         }
     }
-
-    Ok([
-        Arc::new(AsyncPktInfoUdpSocket::from_std(socket_v4.into())?),
-        Arc::new(AsyncPktInfoUdpSocket::from_std(socket_v6.into())?),
-    ])
+    None
 }
 
-/// Sends mDNS service announcement across all available network interfaces.
+/// Sets up a multicast socket for mDNS matching the advertised IP family.
 ///
-/// This function creates an mDNS response message for each interface with the
-/// appropriate IP address and sends it via multicast.
+/// This function creates a UDP socket, configures it for address reuse,
+/// binds it to the mDNS port on a wildcard address, and joins the
+/// mDNS multicast group on the interface matching the advertised IP.
+///
+/// # Arguments
+/// * `if_addrs` - A slice of network interfaces to join multicast groups on.
+/// * `advertised_ip` - The IP address to advertise, used to determine IPv4 or IPv6.
+///
+/// # Returns
+/// A `Result` containing an `Arc<AsyncPktInfoUdpSocket>` if successful.
+pub async fn setup_multicast_socket(
+    advertised_ip: IpAddr,
+) -> Result<Arc<UdpSocket>, std::io::Error> {
+    match advertised_ip {
+        IpAddr::V4(ipv4) => {
+            let socket = socket2::Socket::new(
+                socket2::Domain::IPV4,
+                socket2::Type::DGRAM,
+                Some(socket2::Protocol::UDP),
+            )?;
+            socket.set_reuse_address(true)?;
+            #[cfg(target_family = "unix")]
+            socket.set_reuse_port(true)?;
+            socket.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, MDNS_PORT).into())?;
+            socket.set_multicast_loop_v4(true)?;
+
+            // Join multicast group on the advertised IP interface
+            socket.join_multicast_v4(&MDNS_IPV4_ADDR, &ipv4)?;
+            log::debug!("Joined mDNS IPv4 multicast group on interface {}", ipv4);
+
+            // Set multicast interface to the advertised IP
+            socket.set_multicast_if_v4(&ipv4)?;
+            log::debug!("Set multicast IPv4 interface to {}", ipv4);
+
+            socket.set_nonblocking(true)?;
+            let socket = std::net::UdpSocket::from(socket);
+            Ok(Arc::new(UdpSocket::from_std(socket)?))
+        }
+        IpAddr::V6(ipv6) => {
+            let socket = socket2::Socket::new(
+                socket2::Domain::IPV6,
+                socket2::Type::DGRAM,
+                Some(socket2::Protocol::UDP),
+            )?;
+            socket.set_reuse_address(true)?;
+            #[cfg(target_family = "unix")]
+            socket.set_reuse_port(true)?;
+            socket.bind(&SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, MDNS_PORT, 0, 0).into())?;
+            socket.set_multicast_loop_v6(true)?;
+
+            // Find the interface index for the advertised IPv6 address
+            let if_addrs = if_addrs::get_if_addrs()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            let if_index = get_interface_index(&advertised_ip, &if_addrs).unwrap_or(0);
+            socket.join_multicast_v6(&MDNS_IPV6_ADDR, if_index)?;
+            log::debug!(
+                "Joined mDNS IPv6 multicast group on interface {} with index {}",
+                ipv6,
+                if_index
+            );
+
+            // Set multicast interface to the interface index
+            socket.set_multicast_if_v6(if_index)?;
+            log::debug!("Set multicast IPv6 interface to index {}", if_index);
+
+            socket.set_nonblocking(true)?;
+            let socket = std::net::UdpSocket::from(socket);
+            Ok(Arc::new(UdpSocket::from_std(socket)?))
+        }
+    }
+}
+
+/// Sends mDNS service announcement using only the specified advertised IP address.
+///
+/// This function creates an mDNS response message with the advertised IP address
+/// and sends it via the appropriate multicast interface.
 ///
 /// # Arguments
 /// * `socket` - An `AsyncPktInfoUdpSocket` used for sending the data.
 /// * `instance_name` - The fully qualified name of the service instance.
 /// * `port` - The port number where the service is hosted.
-/// * `if_monitor` - An `IfMonitor` instance to get current network interfaces.
+/// * `advertised_ip` - The IP address to advertise (used in A/AAAA records).
 ///
 /// # Returns
-/// A `Result` containing the total number of bytes sent, or an error if sending fails.
+/// A `Result` containing the number of bytes sent, or an error if sending fails.
 pub async fn send_mdns_announcement(
-    socket: &AsyncPktInfoUdpSocket,
+    socket: &UdpSocket,
     instance_name: &Name,
     port: u16,
-    if_monitor: &IfMonitor,
+    advertised_ip: &Arc<RwLock<IpAddr>>,
 ) -> Result<usize, hickory_proto::ProtoError> {
-    let local_addr = socket.local_addr()?;
-    let ifs = if_monitor.get_interfaces().await;
-    let mut total_sent: usize = 0;
+    let ip = *advertised_ip.read().await;
+    let response_message = create_mdns_response_message(instance_name, ip, port);
+    let bytes = response_message.to_bytes()?;
 
-    if local_addr.is_ipv4() {
-        for if_addr in ifs.iter() {
-            if let if_addrs::IfAddr::V4(ref v4) = if_addr.addr {
-                let response_message =
-                    create_mdns_response_message(instance_name, IpAddr::V4(v4.ip), port);
-                let bytes = response_message.to_bytes()?;
+    // Determine multicast address based on IP family
+    let multicast_addr: SocketAddr = match ip {
+        IpAddr::V4(_) => SocketAddr::new(IpAddr::V4(MDNS_IPV4_ADDR), MDNS_PORT),
+        IpAddr::V6(_) => SocketAddr::new(IpAddr::V6(MDNS_IPV6_ADDR), MDNS_PORT),
+    };
 
-                if let Err(e) = socket.set_multicast_if_v4(&v4.ip) {
-                    log::warn!("Failed to set multicast IPv4 interface {}: {}", v4.ip, e);
-                    continue;
-                }
-                match socket.send_to(&bytes, (MDNS_IPV4_ADDR, MDNS_PORT)).await {
-                    Ok(n) => {
-                        total_sent = total_sent.saturating_add(n);
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to send mDNS IPv4 announcement on interface {}: {}",
-                            v4.ip,
-                            e
-                        );
-                    }
-                }
-            }
+    match socket.send_to(&bytes, multicast_addr).await {
+        Ok(n) => {
+            log::debug!(
+                "Sent mDNS announcement for {} with IP {} ({} bytes)",
+                instance_name,
+                ip,
+                n
+            );
+            Ok(n)
         }
-    } else if local_addr.is_ipv6() {
-        let mut joined_ifindexes = std::collections::HashSet::new();
-        for if_addr in ifs.iter() {
-            if let if_addrs::IfAddr::V6(ref v6) = if_addr.addr {
-                if let Some(idx) = if_addr.index {
-                    if joined_ifindexes.insert(idx) {
-                        let response_message =
-                            create_mdns_response_message(instance_name, IpAddr::V6(v6.ip), port);
-                        let bytes = response_message.to_bytes()?;
-
-                        if let Err(e) = socket.set_multicast_if_v6(idx) {
-                            log::warn!(
-                                "Failed to set multicast IPv6 interface index {}: {}",
-                                idx,
-                                e
-                            );
-                            continue;
-                        }
-                        match socket.send_to(&bytes, (MDNS_IPV6_ADDR, MDNS_PORT)).await {
-                            Ok(n) => {
-                                total_sent = total_sent.saturating_add(n);
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "Failed to send mDNS IPv6 announcement on if_index {}: {}",
-                                    idx,
-                                    e
-                                );
-                            }
-                        }
-                    }
-                }
-            }
+        Err(e) => {
+            log::warn!(
+                "Failed to send mDNS announcement for {} with IP {}: {}",
+                instance_name,
+                ip,
+                e
+            );
+            Ok(0)
         }
-    }
-    Ok(total_sent)
-}
-
-/// Sends byte data to the appropriate mDNS multicast address (IPv4 or IPv6)
-/// across all available network interfaces for the socket's family.
-///
-/// # Arguments
-/// * `socket` - An `AsyncPktInfoUdpSocket` used for sending the data. The socket's family
-///   determines whether to use the IPv4 or IPv6 mDNS multicast address.
-/// * `bytes` - A slice of bytes representing the mDNS message to send.
-/// * `if_monitor` - An `IfMonitor` instance to get current network interfaces.
-///
-/// # Returns
-/// A `Result` containing the total number of bytes sent, or an `std::io::Error` if sending fails.
-pub async fn send_to_mdns(
-    socket: &AsyncPktInfoUdpSocket,
-    bytes: &[u8],
-    if_monitor: &IfMonitor,
-) -> Result<usize, std::io::Error> {
-    // Send mDNS on all interfaces for the socket's IP family
-    let local_addr = socket.local_addr()?;
-    let ifs = if_monitor.get_interfaces().await;
-
-    let mut total_sent: usize = 0;
-
-    if local_addr.is_ipv4() {
-        // Iterate all IPv4 interfaces and send via each
-        for if_addr in ifs.into_iter() {
-            if let if_addrs::IfAddr::V4(v4) = if_addr.addr {
-                if let Err(e) = socket.set_multicast_if_v4(&v4.ip) {
-                    log::warn!("Failed to set multicast IPv4 interface {}: {}", v4.ip, e);
-                    continue;
-                }
-                match socket.send_to(bytes, (MDNS_IPV4_ADDR, MDNS_PORT)).await {
-                    Ok(n) => {
-                        total_sent = total_sent.saturating_add(n);
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to send mDNS IPv4 packet on interface {}: {}",
-                            v4.ip,
-                            e
-                        );
-                    }
-                }
-            }
-        }
-        Ok(total_sent)
-    } else if local_addr.is_ipv6() {
-        // Iterate all IPv6 interfaces and send via each
-        let mut joined_ifindexes = std::collections::HashSet::new();
-        for if_addr in ifs.into_iter() {
-            if let if_addrs::IfAddr::V6(_v6) = if_addr.addr {
-                if let Some(idx) = if_addr.index {
-                    if joined_ifindexes.insert(idx) {
-                        if let Err(e) = socket.set_multicast_if_v6(idx) {
-                            log::warn!(
-                                "Failed to set multicast IPv6 interface index {}: {}",
-                                idx,
-                                e
-                            );
-                            continue;
-                        }
-                        match socket.send_to(bytes, (MDNS_IPV6_ADDR, MDNS_PORT)).await {
-                            Ok(n) => {
-                                total_sent = total_sent.saturating_add(n);
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "Failed to send mDNS IPv6 packet on if_index {}: {}",
-                                    idx,
-                                    e
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok(total_sent)
-    } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::AddrNotAvailable,
-            "Socket local address is neither IPv4 nor IPv6",
-        ))
     }
 }
 
@@ -274,7 +182,11 @@ pub async fn send_to_mdns(
 ///
 /// # Returns
 /// An mDNS `Message` configured as a response, ready to be serialized and sent.
-pub fn create_mdns_response_message(instance_name: &Name, interface_ip: IpAddr, port: u16) -> Message {
+pub fn create_mdns_response_message(
+    instance_name: &Name,
+    interface_ip: IpAddr,
+    port: u16,
+) -> Message {
     let mut message = Message::new();
     message
         .set_id(0)
@@ -435,39 +347,4 @@ pub fn extract_service_info(message: &Message) -> Option<(Name, SocketAddr)> {
     }
 
     None
-}
-
-/// Resolves the local IP address for the interface that received the packet.
-pub async fn resolve_interface_ip(
-    pkt_info: &PktInfo,
-    if_monitor: &Arc<IfMonitor>,
-    prefer_ipv6: bool,
-) -> IpAddr {
-    if pkt_info.addr_dst.is_multicast() {
-        let ifs = if_monitor.get_interfaces().await;
-        let iface_addrs: Vec<_> = ifs
-            .iter()
-            .filter(|iface| iface.index == Some(pkt_info.if_index))
-            .collect();
-
-        // Try to find the preferred address family first.
-        let found = iface_addrs
-            .iter()
-            .find(|iface| match iface.addr {
-                if_addrs::IfAddr::V4(_) => !prefer_ipv6,
-                if_addrs::IfAddr::V6(_) => prefer_ipv6,
-            })
-            .copied()
-            // If the preferred family is not found, fallback to any address on the same interface.
-            .or_else(|| iface_addrs.first().copied());
-
-        found
-            .map(|iface| match iface.addr {
-                if_addrs::IfAddr::V4(ref v4) => IpAddr::V4(v4.ip),
-                if_addrs::IfAddr::V6(ref v6) => IpAddr::V6(v6.ip),
-            })
-            .unwrap_or(pkt_info.addr_dst)
-    } else {
-        pkt_info.addr_dst
-    }
 }
