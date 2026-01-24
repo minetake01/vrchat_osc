@@ -22,7 +22,6 @@ rosc = "0.11"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
-convert_case = "0.7"
 wildmatch = "2.4.0"
 socket2 = "0.6"
 if-addrs = "0.14"

@@ -7,11 +7,11 @@ pub use rosc;
 
 use crate::fetch::fetch;
 
-use convert_case::{Case, Casing};
 use futures::{stream, StreamExt};
 use hickory_proto::rr::Name;
 use oscquery::models::{HostInfo, OscNode, OscRootNode};
 use rosc::OscPacket;
+use std::str::FromStr;
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -131,6 +131,27 @@ fn find_local_ip_for_destination(dest_ip: IpAddr) -> Result<IpAddr, Error> {
 
     socket.connect((dest_ip, 0))?;
     Ok(socket.local_addr()?.ip())
+}
+
+/// Sanitizes the service name to be compatible with mDNS and VRChat requirements.
+///
+/// Rules:
+/// - Keep ASCII alphanumerics, hyphens, and all non-ASCII characters.
+/// - Replace any other ASCII characters (including spaces and symbols) with '-'.
+/// - Replace Unicode control characters with '-'.
+/// - Replace uppercase ASCII characters with lowercase.
+fn sanitize_service_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if (c.is_ascii() && !c.is_ascii_alphanumeric()) || c.is_control() {
+                '-'
+            } else if c.is_ascii_uppercase() {
+                c.to_ascii_lowercase()
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 impl VRChatOSC {
@@ -257,7 +278,7 @@ impl VRChatOSC {
 
         // Spawn a task to handle incoming OSC packets.
         let osc_handle = tokio::spawn(async move {
-            let mut buf = [0; rosc::decoder::MTU]; // Buffer for receiving OSC packets.
+            let mut buf = [0; OSC_PACKET_BUFFER_SIZE]; // Buffer for receiving OSC packets.
             loop {
                 // Wait to receive data on the socket.
                 match socket.recv_from(&mut buf).await {
@@ -289,12 +310,9 @@ impl VRChatOSC {
             }
         });
 
-        // Create mDNS service announcements.
-        let service_name_upper_camel = service_name.to_case(Case::UpperCamel); // Convert service name case.
-
         // Start OSCQuery server (HTTP server)
         let host_info = HostInfo::new(
-            service_name_upper_camel.clone(),
+            service_name.to_string(),
             osc_local_addr.ip(),   // Use the IP of the OSC server.
             osc_local_addr.port(), // Use the port of the OSC server.
         );
@@ -304,16 +322,19 @@ impl VRChatOSC {
             .serve(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
             .await?;
 
+        // Create mDNS service announcements.
+        let sanitized_service_name = sanitize_service_name(service_name);
+
         // Register the OSC and OSCQuery services with mDNS.
         self.mdns
             .register(
-                Name::from_ascii(format!("{}._osc._udp.local.", service_name_upper_camel))?,
+                Name::from_str(&format!("{}._osc._udp.local.", sanitized_service_name))?,
                 osc_local_addr.port(),
             )
             .await?;
         self.mdns
             .register(
-                Name::from_ascii(format!("{}._oscjson._tcp.local.", service_name_upper_camel))?,
+                Name::from_str(&format!("{}._oscjson._tcp.local.", sanitized_service_name))?,
                 osc_query_local_addr.port(),
             )
             .await?;
@@ -336,21 +357,21 @@ impl VRChatOSC {
     /// # Arguments
     /// * `service_name` - The name of the service to unregister.
     pub async fn unregister(&self, service_name: &str) -> Result<(), Error> {
-        let service_name_upper_camel = service_name.to_case(Case::UpperCamel);
+        let sanitized_service_name = sanitize_service_name(service_name);
         // Remove the service from our tracking.
         let mut service_handles_map = self.service_handles.write().await;
         if let Some(mut service_handle_entry) = service_handles_map.remove(service_name) {
             // Unregister from mDNS.
             self.mdns
-                .unregister(Name::from_ascii(format!(
+                .unregister(Name::from_str(&format!(
                     "{}._osc._udp.local.",
-                    service_name_upper_camel
+                    sanitized_service_name
                 ))?)
                 .await?;
             self.mdns
-                .unregister(Name::from_ascii(format!(
+                .unregister(Name::from_str(&format!(
                     "{}._oscjson._tcp.local.",
-                    service_name_upper_camel
+                    sanitized_service_name
                 ))?)
                 .await?;
 
@@ -491,13 +512,13 @@ impl VRChatOSC {
 
         for name in service_names {
             if let Some(mut handle) = service_handles_map.remove(&name) {
-                let service_name_upper_camel = name.to_case(Case::UpperCamel);
+                let sanitized_service_name = sanitize_service_name(&name);
                 // Attempt to unregister from mDNS. Errors are logged but not propagated to allow other services to shut down.
                 if let Err(e) = self
                     .mdns
-                    .unregister(Name::from_ascii(format!(
+                    .unregister(Name::from_str(&format!(
                         "{}._osc._udp.local.",
-                        service_name_upper_camel
+                        sanitized_service_name
                     ))?)
                     .await
                 {
@@ -505,9 +526,9 @@ impl VRChatOSC {
                 }
                 if let Err(e) = self
                     .mdns
-                    .unregister(Name::from_ascii(format!(
+                    .unregister(Name::from_str(&format!(
                         "{}._oscjson._tcp.local.",
-                        service_name_upper_camel
+                        sanitized_service_name
                     ))?)
                     .await
                 {
