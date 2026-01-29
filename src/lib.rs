@@ -2,10 +2,15 @@ mod fetch;
 mod mdns;
 mod oscquery;
 
-pub use oscquery::*;
+pub use oscquery::models;
 pub use rosc;
 
+pub use fetch::Error as FetchError;
+pub use mdns::Error as MdnsError;
+pub use oscquery::Error as OscQueryError;
+
 use crate::fetch::fetch;
+use crate::oscquery::OscQuery;
 
 use futures::{stream, StreamExt};
 use hickory_proto::rr::Name;
