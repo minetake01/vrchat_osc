@@ -3,10 +3,9 @@
 [![Crates.io](https://img.shields.io/crates/v/vrchat_osc)](https://crates.io/crates/vrchat_osc)
 [![Documentation](https://docs.rs/vrchat_osc/badge.svg)](https://docs.rs/vrchat_osc)
 
-**`vrchat_osc` is a Rust crate designed to easily utilize VRChat's OSC (Open Sound Control) and OSCQuery protocols.**
+**`vrchat_osc` is a Rust crate designed to easily send and receive OSC messages and retrieve parameters from VRChat clients and other OSCQuery-compatible services.**
 
-This crate is specifically designed to handle VRChat's unique network implementation behaviors, such as non-standard mDNS responses and binding specificities.
-For details on technical workarounds implemented in this crate, please refer to [WORKAROUNDS.md](./WORKAROUNDS.md).
+This crate handles discovery and communication automatically, allowing you to focus on your application logic without worrying about the underlying networking protocols. Technical details on the implementation and workarounds for specific network behaviors can be found in [WORKAROUNDS.md](./WORKAROUNDS.md).
 
 ## Supported Network Environments
 
@@ -38,12 +37,11 @@ This crate is cross-platform and supports the following operating systems:
 
 ## Key Features
 
-* **OSC Communication**: Easily send and receive OSC messages with the VRChat client.
-* **OSCQuery Service Discovery**:
-    * Automatically discovers VRChat clients and other OSCQuery-compatible services on the local network using mDNS.
-* **OSC Service Registration**: Publish your own OSC services and respond to queries from VRChat or other tools.
-* **OSCQuery Get Parameter**: Retrieve specific parameters from VRChat clients using OSCQuery.
-* **Asynchronous Support**: Achieves efficient I/O operations based on the Tokio runtime for asynchronous processing.
+* **Simple OSC Communication**: Easily send and receive OSC messages with just a few lines of code.
+* **Auto-Discovery**: Automatically find VRChat clients and OSCQuery services on your local network.
+* **Parameter Management**: Retrieve parameters seamlessly using OSCQuery.
+* **Service Registration**: Make your own application discoverable as an OSC service.
+* **Asynchronous API**: Built on the Tokio runtime for efficient, non-blocking operations.
 
 ## Setup
 
@@ -51,7 +49,7 @@ To use this crate, add the following dependencies to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vrchat_osc = "1"
+vrchat_osc = "2"
 tokio = { version = "1", features = ["full"] }
 ```
 

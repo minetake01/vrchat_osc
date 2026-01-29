@@ -60,7 +60,7 @@ pub enum ServiceType {
     OscQuery(Name, SocketAddr),
 }
 
-/// Main struct for managing VRChat OSC services, discovery, and communication.
+/// Main struct for managing VRChat OSC communication and service discovery.
 pub struct VRChatOSC {
     /// Socket for sending OSC messages.
     send_socket: UdpSocket,
@@ -156,14 +156,10 @@ fn sanitize_service_name(name: &str) -> String {
 
 impl VRChatOSC {
     /// Creates a new `VRChatOSC` instance.
-    /// Initializes mDNS, sets up service discovery, and starts a listener task for mDNS service notifications.
     ///
     /// # Arguments
-    /// * `osc_ip` - Optional IP address serves as the destination for OSC messages. When `None`,
-    ///   automatically selects a non-loopback IPv4 interface that is up. If no such interface is found,
-    ///   returns an error. Specifying this is necessary to restrict mDNS announcements
-    ///   to a single network interface, addressing a VRChat implementation issue where advertising on
-    ///   multiple interfaces leads to duplicate service discovery.
+    /// * `osc_ip` - Optional destination IP address for OSC messages.
+    ///   If `None`, it will attempt to automatically find a suitable network interface.
     pub async fn new(osc_ip: Option<IpAddr>) -> Result<Arc<VRChatOSC>, Error> {
         let osc_ip = match osc_ip {
             Some(ip) => ip,
@@ -223,13 +219,10 @@ impl VRChatOSC {
         }))
     }
 
-    /// Sets the OSC destination IP address (VRChat's IP) and updates mDNS advertising accordingly.
-    ///
-    /// This changes the destination IP for OSC communication and derives the local
-    /// interface IP to advertise via mDNS based on the new destination.
+    /// Sets the destination IP address for OSC messages.
     ///
     /// # Arguments
-    /// * `ip` - The new destination IP address (VRChat's IP).
+    /// * `ip` - The new destination IP address.
     pub async fn set_osc_ip(&self, ip: IpAddr) -> Result<(), Error> {
         *self.osc_ip.write().await = ip;
         let advertised_ip = find_local_ip_for_destination(ip)?;
@@ -237,16 +230,15 @@ impl VRChatOSC {
         Ok(())
     }
 
-    /// Gets the currently configured OSC destination IP address (VRChat's IP).
+    /// Gets the currently configured OSC destination IP address.
     pub async fn get_osc_ip(&self) -> IpAddr {
         *self.osc_ip.read().await
     }
 
-    /// Registers a callback function to be invoked when an mDNS service is discovered.
+    /// Registers a callback to be invoked when a new OSC service is discovered on the network.
     ///
     /// # Arguments
-    /// * `callback` - A function or closure that takes the service `Name` and `SocketAddr`
-    ///                as arguments. It must be `Send + Sync + 'static`.
+    /// * `callback` - A function or closure called with the discovered service details.
     pub async fn on_connect<F>(&self, callback: F)
     where
         F: Fn(ServiceType) + Send + Sync + 'static,
@@ -255,13 +247,12 @@ impl VRChatOSC {
         *callback_guard = Some(Arc::new(callback));
     }
 
-    /// Registers a new OSC service with the local mDNS daemon and starts listening for OSC messages.
+    /// Registers a local OSC service to be discoverable by other clients.
     ///
     /// # Arguments
-    /// * `service_name` - The name of the service to register (e.g., "MyAppOSC").
-    /// * `parameters` - The root node of the OSC address space for this service.
-    /// * `handler` - A function that will be called when an OSC packet is received for this service.
-    ///               It must be `Fn(OscPacket) + Send + 'static`.
+    /// * `service_name` - The name of the service to register.
+    /// * `parameters` - The OSC address space and parameters for this service.
+    /// * `handler` - A function called when an OSC packet is received for this service.
     pub async fn register<F>(
         &self,
         service_name: &str,
@@ -351,8 +342,7 @@ impl VRChatOSC {
         Ok(())
     }
 
-    /// Unregisters an OSC service.
-    /// Stops the OSC and OSCQuery servers and removes mDNS announcements.
+    /// Unregisters an OSC service and stops its servers.
     ///
     /// # Arguments
     /// * `service_name` - The name of the service to unregister.
@@ -382,12 +372,11 @@ impl VRChatOSC {
         Ok(())
     }
 
-    /// Sends an OSC packet to services matching a given pattern.
+    /// Sends an OSC packet to services matching a name pattern.
     ///
     /// # Arguments
     /// * `packet` - The `OscPacket` to send.
-    /// * `to` - A glob pattern (e.g., "VRChat-Client-*") to match against service names.
-    ///          This matches against the service instance name found via mDNS.
+    /// * `to` - A pattern (e.g., "VRChat-Client-*") to match against discovered service names.
     pub async fn send(&self, packet: OscPacket, to: &str) -> Result<(), Error> {
         // Find services matching the pattern. The matching logic is within `find_service`.
         // The closure provided to `find_service` determines if a service (by its Name) matches.
@@ -429,16 +418,14 @@ impl VRChatOSC {
         Ok(())
     }
 
-    /// Retrieves a specific OSC parameter (node) from services matching a pattern.
+    /// Retrieves a specific parameter from services matching a name pattern.
     ///
     /// # Arguments
-    /// * `method` - The OSC path of the parameter to fetch (e.g., "/avatar/parameters/SomeParam").
-    /// * `from` - A glob pattern (e.g., "VRChat-Client-*") to match against service names.
-    ///          This matches against the service instance name found via mDNS.
+    /// * `method` - The OSC path of the parameter (e.g., "/avatar/parameters/MyParam").
+    /// * `from` - A pattern (e.g., "VRChat-Client-*") to match against discovered service names.
     ///
     /// # Returns
-    /// A `Vec` of tuples, where each tuple contains the service `Name` and the fetched `OscNode`.
-    /// Returns an empty Vec if no services match or if fetching fails for all matched services.
+    /// A list of matching service names and their corresponding parameter values.
     pub async fn get_parameter(
         &self,
         method: &str,
@@ -486,14 +473,14 @@ impl VRChatOSC {
         Ok(params)
     }
 
-    /// Retrieves a specific OSC parameter (node) from a specific OSCQuery service address.
+    /// Retrieves a specific parameter from a specific service address.
     ///
     /// # Arguments
-    /// * `method` - The OSC path of the parameter to fetch (e.g., "/avatar/parameters/SomeParam").
-    /// * `addr` - The `SocketAddr` of the OSCQuery service.
+    /// * `method` - The OSC path of the parameter (e.g., "/avatar/parameters/MyParam").
+    /// * `addr` - The address of the service.
     ///
     /// # Returns
-    /// The fetched `OscNode`.
+    /// The fetched parameter value.
     pub async fn get_parameter_from_addr(
         &self,
         method: &str,
