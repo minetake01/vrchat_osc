@@ -60,9 +60,9 @@ struct ServiceHandle {
 
 pub enum ServiceType {
     /// OSC service type.
-    Osc(Name, SocketAddr),
+    Osc(String, SocketAddr),
     /// OSCQuery service type.
-    OscQuery(Name, SocketAddr),
+    OscQuery(String, SocketAddr),
 }
 
 /// Main struct for managing VRChat OSC communication and service discovery.
@@ -206,9 +206,9 @@ impl VRChatOSC {
                     // If a callback is registered, invoke it with the service name and address.
                     if let Some(callback) = callback_guard.as_ref() {
                         if service_name.trim_to(3).to_ascii() == "_osc._udp.local." {
-                            callback(ServiceType::Osc(service_name.clone(), socket_addr));
+                            callback(ServiceType::Osc(service_name.to_utf8(), socket_addr));
                         } else if service_name.trim_to(3).to_ascii() == "_oscjson._tcp.local." {
-                            callback(ServiceType::OscQuery(service_name.clone(), socket_addr));
+                            callback(ServiceType::OscQuery(service_name.to_utf8(), socket_addr));
                         }
                     }
                 }
