@@ -58,6 +58,7 @@ struct ServiceHandle {
     osc_query: OscQuery,
 }
 
+/// Represents the type of OSC service discovered.
 pub enum ServiceType {
     /// OSC service type.
     Osc(String, SocketAddr),
