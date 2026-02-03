@@ -436,9 +436,9 @@ impl VRChatOSC {
         &self,
         method: &str,
         from: &str,
-    ) -> Result<Vec<(Name, OscNode)>, Error> {
+    ) -> Result<Vec<(String, OscNode)>, Error> {
         // Find services matching the pattern. The matching logic is within `find_service`.
-        // The closure provided to `find_service` determines if a service (by its Name) matches.
+        // The closure provided to `find_service` determines if a service matches.
         let services = self
             .mdns
             .find_service(|name, _| {
@@ -464,7 +464,7 @@ impl VRChatOSC {
             .map(|(name, addr)| async move {
                 fetch::<_, OscNode>(addr, method)
                     .await
-                    .map(|(param, _)| (name.clone(), param))
+                    .map(|(param, _)| (name.to_utf8(), param))
             })
             .buffer_unordered(3)
             .filter_map(|res| async {
