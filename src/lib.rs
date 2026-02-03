@@ -206,9 +206,9 @@ impl VRChatOSC {
                     let callback_guard = callback_arc_clone.read().await;
                     // If a callback is registered, invoke it with the service name and address.
                     if let Some(callback) = callback_guard.as_ref() {
-                        if service_name.trim_to(3).to_ascii() == "_osc._udp.local." {
+                        if service_name.trim_to(3).to_utf8() == "_osc._udp.local." {
                             callback(ServiceType::Osc(service_name.to_utf8(), socket_addr));
-                        } else if service_name.trim_to(3).to_ascii() == "_oscjson._tcp.local." {
+                        } else if service_name.trim_to(3).to_utf8() == "_oscjson._tcp.local." {
                             callback(ServiceType::OscQuery(service_name.to_utf8(), socket_addr));
                         }
                     }
@@ -390,7 +390,7 @@ impl VRChatOSC {
             .mdns
             .find_service(|name, _| {
                 // `WildMatch` performs glob-style pattern matching.
-                WildMatch::new(&format!("{}._osc._udp.local.", to)).matches(&name.to_ascii())
+                WildMatch::new(&format!("{}._osc._udp.local.", to)).matches(&name.to_utf8())
             })
             .await;
 
@@ -442,7 +442,7 @@ impl VRChatOSC {
         let services = self
             .mdns
             .find_service(|name, _| {
-                WildMatch::new(&format!("{}._oscjson._tcp.local.", from)).matches(&name.to_ascii())
+                WildMatch::new(&format!("{}._oscjson._tcp.local.", from)).matches(&name.to_utf8())
             })
             .await;
 
