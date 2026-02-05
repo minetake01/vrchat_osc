@@ -228,8 +228,12 @@ impl VRChatOSC {
     /// Sets the destination IP address for OSC messages.
     ///
     /// # Arguments
-    /// * `ip` - The new destination IP address.
-    pub async fn set_osc_ip(&self, ip: IpAddr) -> Result<(), Error> {
+    /// * `ip` - The new destination IP address. If `None`, it will attempt to automatically find a suitable network interface.
+    pub async fn set_osc_ip(&self, ip: Option<IpAddr>) -> Result<(), Error> {
+        let ip = match ip {
+            Some(ip) => ip,
+            None => find_non_loopback_ipv4().ok_or(Error::NoValidInterface)?,
+        };
         *self.osc_ip.write().await = ip;
         let advertised_ip = find_local_ip_for_destination(ip)?;
         self.mdns.set_advertised_ip(advertised_ip).await;
