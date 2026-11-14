@@ -15,12 +15,13 @@ use crate::fetch::fetch;
 use crate::oscquery::OscQuery;
 
 use futures::{stream, StreamExt};
-use hickory_proto::rr::Name;
+use hickory_proto::rr::{Label, Name};
 use oscquery::models::{HostInfo, OscNode, OscRootNode};
 use rosc::OscPacket;
 use std::str::FromStr;
 use std::{
     collections::HashMap,
+    fmt,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
@@ -61,14 +62,48 @@ struct ServiceHandle {
     osc_query: OscQuery,
 }
 
+/// A service discovered on the local network.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Service {
+    name: String,
+    addr: SocketAddr,
+}
+
+impl Service {
+    /// Creates a service from its instance name and address.
+    pub fn new(name: impl Into<String>, addr: SocketAddr) -> Self {
+        Self {
+            name: name.into(),
+            addr,
+        }
+    }
+
+    /// The instance name of the service, without the mDNS service type suffix
+    /// (for example `VRChat-Client-1234`).
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The address the service listens on.
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
+    }
+}
+
+impl fmt::Display for Service {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} at {}", self.name, self.addr)
+    }
+}
+
 /// Represents the type of OSC service discovered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ServiceType {
     /// OSC service type.
-    Osc(String, SocketAddr),
+    Osc(Service),
     /// OSCQuery service type.
-    OscQuery(String, SocketAddr),
+    OscQuery(Service),
 }
 
 /// Main struct for managing VRChat OSC communication and service discovery.
@@ -145,6 +180,33 @@ fn find_local_ip_for_destination(dest_ip: IpAddr) -> Result<IpAddr, Error> {
     Ok(socket.local_addr()?.ip())
 }
 
+/// Returns the instance name of a discovered service, that is, the label before
+/// the service type (`VRChat-Client-1234._osc._udp.local.` -> `VRChat-Client-1234`).
+fn instance_name(name: &Name) -> String {
+    name.iter()
+        .next()
+        .and_then(|label| Label::from_raw_bytes(label).ok())
+        .map(|label| label.to_utf8())
+        .unwrap_or_default()
+}
+
+/// Returns whether the instance name of a discovered service matches a glob pattern.
+fn matches_instance(name: &Name, pattern: &str) -> bool {
+    WildMatch::new(pattern).matches(&instance_name(name))
+}
+
+/// Builds the discovered service from its mDNS name, or `None` when the name
+/// does not belong to a service type this crate follows.
+fn discovered_service(name: &Name, addr: SocketAddr) -> Option<ServiceType> {
+    let service = Service::new(instance_name(name), addr);
+
+    match name.trim_to(3).to_utf8().as_str() {
+        "_osc._udp.local." => Some(ServiceType::Osc(service)),
+        "_oscjson._tcp.local." => Some(ServiceType::OscQuery(service)),
+        _ => None,
+    }
+}
+
 /// Sanitizes the service name to be compatible with mDNS and VRChat requirements.
 ///
 /// Rules:
@@ -209,14 +271,14 @@ impl VRChatOsc {
             // Continuously try to receive messages from the discovery notification channel.
             loop {
                 if let Some((service_name, socket_addr)) = discover_notifier_rx.recv().await {
+                    let Some(service_type) = discovered_service(&service_name, socket_addr) else {
+                        continue;
+                    };
+
                     let callback_guard = callback_arc_clone.read().await;
-                    // If a callback is registered, invoke it with the service name and address.
+                    // If a callback is registered, invoke it with the discovered service.
                     if let Some(callback) = callback_guard.as_ref() {
-                        if service_name.trim_to(3).to_utf8() == "_osc._udp.local." {
-                            callback(ServiceType::Osc(service_name.to_utf8(), socket_addr));
-                        } else if service_name.trim_to(3).to_utf8() == "_oscjson._tcp.local." {
-                            callback(ServiceType::OscQuery(service_name.to_utf8(), socket_addr));
-                        }
+                        callback(service_type);
                     }
                 }
             }
@@ -403,7 +465,7 @@ impl VRChatOsc {
     ///
     /// # Arguments
     /// * `packet` - The `OscPacket` to send.
-    /// * `to` - A pattern (e.g., "VRChat-Client-*") to match against discovered service names.
+    /// * `to` - A glob pattern (e.g., "VRChat-Client-*") matched against the service instance name.
     ///
     /// # Returns
     /// The number of discovered services the packet was addressed to.
@@ -412,12 +474,8 @@ impl VRChatOsc {
         // The closure provided to `find_service` determines if a service (by its Name) matches.
         let services = self
             .mdns
-            .find_service(|name, _| {
-                // `WildMatch` performs glob-style pattern matching.
-                WildMatch::new(&format!("{}._osc._udp.local.", to)).matches(&name.to_utf8())
-            })
+            .find_service(|name, _| matches_instance(name, to))
             .await;
-
         if services.is_empty() {
             log::info!("No mDNS services found matching the expression: {}", to);
             return Ok(0);
@@ -455,24 +513,22 @@ impl VRChatOsc {
     ///
     /// # Arguments
     /// * `method` - The OSC path of the parameter (e.g., "/avatar/parameters/MyParam").
-    /// * `from` - A pattern (e.g., "VRChat-Client-*") to match against discovered service names.
+    /// * `from` - A glob pattern (e.g., "VRChat-Client-*") matched against the service instance name.
     ///
     /// # Returns
-    /// One entry per matching service, pairing the service name with the result of
+    /// One entry per matching service, pairing the service with the result of
     /// fetching the parameter from it. A service that could not be reached, or that
     /// does not expose `method`, is reported as `Err`.
     pub async fn get_parameter(
         &self,
         method: &str,
         from: &str,
-    ) -> Vec<(String, Result<OscNode, Error>)> {
+    ) -> Vec<(Service, Result<OscNode, Error>)> {
         // Find services matching the pattern. The matching logic is within `find_service`.
         // The closure provided to `find_service` determines if a service matches.
         let services = self
             .mdns
-            .find_service(|name, _| {
-                WildMatch::new(&format!("{}._oscjson._tcp.local.", from)).matches(&name.to_utf8())
-            })
+            .find_service(|name, _| matches_instance(name, from))
             .await;
 
         // Asynchronously fetch the parameter from all matching services.
@@ -487,7 +543,7 @@ impl VRChatOsc {
                     .map(|(parameter, _)| parameter)
                     .map_err(Error::from);
 
-                (name.to_utf8(), parameter)
+                (Service::new(instance_name(&name), addr), parameter)
             })
             .buffer_unordered(3)
             .collect()
@@ -583,5 +639,44 @@ impl Drop for VRChatOsc {
                 log::warn!("VRChatOsc: Could not acquire lock on service_handles during drop. Explicitly call shutdown() for robust cleanup.");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn addr() -> SocketAddr {
+        "192.168.1.20:9000".parse().unwrap()
+    }
+
+    #[test]
+    fn discovered_service_strips_the_service_type() {
+        let osc = Name::from_ascii("VRChat-Client-1234._osc._udp.local.").unwrap();
+        assert_eq!(
+            discovered_service(&osc, addr()),
+            Some(ServiceType::Osc(Service::new("VRChat-Client-1234", addr())))
+        );
+
+        let oscjson = Name::from_ascii("VRChat-Client-1234._oscjson._tcp.local.").unwrap();
+        assert_eq!(
+            discovered_service(&oscjson, addr()),
+            Some(ServiceType::OscQuery(Service::new(
+                "VRChat-Client-1234",
+                addr()
+            )))
+        );
+
+        let other = Name::from_ascii("printer._http._tcp.local.").unwrap();
+        assert_eq!(discovered_service(&other, addr()), None);
+    }
+
+    #[test]
+    fn patterns_match_the_instance_name() {
+        let name = Name::from_ascii("VRChat-Client-1234._osc._udp.local.").unwrap();
+
+        assert!(matches_instance(&name, "VRChat-Client-*"));
+        assert!(matches_instance(&name, "VRChat-Client-1234"));
+        assert!(!matches_instance(&name, "Other-*"));
     }
 }

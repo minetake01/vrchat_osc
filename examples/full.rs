@@ -22,9 +22,10 @@ async fn main() -> Result<(), Error> {
     let cloned_vrchat_osc = vrchat_osc.clone();
     vrchat_osc
         .on_connect(move |res| match res {
-            ServiceType::Osc(name, addr) => {
-                log::info!("Connected to OSC server: {} at {}", name, addr);
+            ServiceType::Osc(service) => {
+                log::info!("Connected to OSC server: {}", service);
                 let vrchat_osc = cloned_vrchat_osc.clone();
+                let addr = service.addr();
                 // Send a message to the OSC server
                 tokio::spawn(async move {
                     vrchat_osc
@@ -40,9 +41,10 @@ async fn main() -> Result<(), Error> {
                     log::info!("Sent message to OSC server.");
                 });
             }
-            ServiceType::OscQuery(name, addr) => {
-                log::info!("Connected to OSCQuery server: {} at {}", name, addr);
+            ServiceType::OscQuery(service) => {
+                log::info!("Connected to OSCQuery server: {}", service);
                 let vrchat_osc = cloned_vrchat_osc.clone();
+                let addr = service.addr();
                 // Get parameters from the OSCQuery server
                 tokio::spawn(async move {
                     const RETRY_COUNT: u8 = 30;
