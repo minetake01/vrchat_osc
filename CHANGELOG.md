@@ -14,8 +14,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `OscRootNode` implements `Default`.
 - `hickory_proto` is re-exported, so the types carried by `Error::HickoryError`
   and `MdnsError::MdnsProtoError` can be named without pinning a version.
-- Regression tests for the mDNS announcement wire format and the OSCQuery JSON
-  field names.
 - `rust-version = "1.88"`.
 
 ### Changed
