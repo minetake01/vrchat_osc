@@ -27,4 +27,17 @@ mod tests {
             "TCP"
         );
     }
+
+    #[test]
+    fn node_type_tag_keeps_its_wire_name() {
+        let node = OscNode {
+            osc_type: OscTypeTag::from_tag("f"),
+            ..Default::default()
+        };
+
+        let json = serde_json::to_value(&node).unwrap();
+
+        assert_eq!(json["TYPE"], "f");
+        assert!(json.get("OSC_TYPE").is_none());
+    }
 }

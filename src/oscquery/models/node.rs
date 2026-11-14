@@ -154,7 +154,7 @@ impl OscRootNode {
         // Update its properties with values from `new_node_props`.
         // Preserve existing children in `current.contents` unless `new_node_props.contents` overwrites them.
         current.description = new_node_props.description.or(current.description.take());
-        current.r#type = new_node_props.r#type.or(current.r#type.take());
+        current.osc_type = new_node_props.osc_type.or(current.osc_type.take());
         current.access = if new_node_props.access != AccessMode::default() {
             new_node_props.access
         } else {
@@ -221,8 +221,8 @@ pub struct OscNode {
 
     /// The OSC type tag string for this node (e.g., "f" for float, "i" for int).
     /// See OSC 1.0 specification for type tags.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub r#type: Option<OscTypeTag>, // `r#` is used because `type` is a keyword in Rust.
+    #[serde(rename = "TYPE", skip_serializing_if = "Option::is_none")]
+    pub osc_type: Option<OscTypeTag>,
 
     /// A human-readable description of this node.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -247,19 +247,19 @@ pub struct OscNode {
 impl OscNode {
     /// Checks if the node's OSC type tag matches a specific single type.
     pub fn is_type(&self, expected_type: &OscType) -> bool {
-        self.r#type
+        self.osc_type
             .as_ref()
             .map_or(false, |tag| tag.is_single_type(expected_type))
     }
 
     /// Checks if the node's OSC type tag represents a boolean.
     pub fn is_boolean_type(&self) -> bool {
-        self.r#type.as_ref().map_or(false, |tag| tag.is_boolean())
+        self.osc_type.as_ref().map_or(false, |tag| tag.is_boolean())
     }
 
     /// Gets the single `OscType` if the node has exactly one type specified.
     pub fn get_single_osc_type(&self) -> Option<&OscType> {
-        self.r#type.as_ref().and_then(|tag| tag.get_single_type())
+        self.osc_type.as_ref().and_then(|tag| tag.get_single_type())
     }
 }
 
