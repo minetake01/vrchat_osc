@@ -35,6 +35,7 @@ const OSC_PACKET_BUFFER_SIZE: usize = 65535; // Max UDP packet size
 
 /// Defines the possible errors that can occur within the VRChatOSC library.
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     #[error("OSC error: {0}")]
     OscError(#[from] rosc::OscError),
@@ -61,6 +62,7 @@ struct ServiceHandle {
 }
 
 /// Represents the type of OSC service discovered.
+#[non_exhaustive]
 pub enum ServiceType {
     /// OSC service type.
     Osc(String, SocketAddr),

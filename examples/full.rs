@@ -66,6 +66,11 @@ async fn main() -> Result<(), Error> {
                     log::info!("Received parameters: {:?}", params);
                 });
             }
+            _ => {
+                // ServiceType is non_exhaustive: a future release may discover
+                // services this example does not know how to use.
+                log::debug!("Ignoring a service type this example does not handle.");
+            }
         })
         .await;
 

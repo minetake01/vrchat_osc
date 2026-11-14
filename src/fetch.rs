@@ -7,6 +7,7 @@ use tokio::net::{TcpStream, ToSocketAddrs};
 
 /// Custom error type for fetch operations.
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

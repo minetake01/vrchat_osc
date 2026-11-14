@@ -29,6 +29,7 @@ const MDNS_IPV6_ADDR: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xFB);
 
 /// Error types that can occur during mDNS operations.
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     #[error("DNS Protocol Error: {0}")]
     MdnsProtoError(#[from] hickory_proto::ProtoError),

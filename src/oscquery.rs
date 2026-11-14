@@ -22,6 +22,7 @@ use tokio::{
 
 /// Custom error types for the OSCQuery server.
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// Error from binding the TCP listener.
     #[error("Failed to bind to address: {0}")]
