@@ -24,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handle in an `Arc` when the discovery callback needs to call back into it.
 - `ServiceType` carries a `Service` instead of a string holding the full mDNS
   name. Patterns passed to `send` and `get_parameter` are matched against the
-  instance name.
+  instance name; `send` still addresses only OSC services and `get_parameter`
+  only OSCQuery services.
 - `send` returns the number of services the packet was addressed to.
 - `get_parameter` returns one entry per matching service with the fetch result
   inside, and no longer wraps the collection in a `Result`.

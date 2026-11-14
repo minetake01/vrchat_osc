@@ -13,7 +13,7 @@ This results in VRChat's services being discoverable via mDNS, even though they 
 
 ### Workaround in This Crate
 
-[`VRChatOsc::new()`](/src/lib.rs#L237-L294) accepts an `osc_ip` parameter (VRChat's IP address) and uses the [`find_local_ip_for_destination`](/src/lib.rs#L157-L181) function to determine the local interface IP that can reach that destination.
+[`VRChatOsc::new()`](/src/lib.rs#L251-L308) accepts an `osc_ip` parameter (VRChat's IP address) and uses the [`find_local_ip_for_destination`](/src/lib.rs#L162-L186) function to determine the local interface IP that can reach that destination.
 
 ```rust
 // Let the OS routing table determine the appropriate interface
