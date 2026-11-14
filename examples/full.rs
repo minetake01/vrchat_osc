@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio;
@@ -16,7 +17,7 @@ async fn main() -> Result<(), Error> {
     // Initialize VRChatOsc instance.
     // When None is passed, automatically selects a non-loopback IPv4 interface.
     // Pass Some(IpAddr) to advertise on a specific network interface
-    let vrchat_osc = VRChatOsc::new(None).await?;
+    let vrchat_osc = Arc::new(VRChatOsc::new(None).await?);
 
     let cloned_vrchat_osc = vrchat_osc.clone();
     vrchat_osc

@@ -172,7 +172,7 @@ impl VRChatOsc {
     /// # Arguments
     /// * `osc_ip` - Optional destination IP address for OSC messages.
     ///   If `None`, it will attempt to automatically find a suitable network interface.
-    pub async fn new(osc_ip: Option<IpAddr>) -> Result<Arc<VRChatOsc>, Error> {
+    pub async fn new(osc_ip: Option<IpAddr>) -> Result<Self, Error> {
         let osc_ip = match osc_ip {
             Some(ip) => ip,
             None => find_non_loopback_ipv4().ok_or(Error::NoValidInterface)?,
@@ -222,13 +222,13 @@ impl VRChatOsc {
             }
         });
 
-        Ok(Arc::new(VRChatOsc {
+        Ok(Self {
             send_socket: socket,
             osc_ip: Arc::new(RwLock::new(osc_ip)),
             mdns: mdns_client,
             service_handles: Arc::new(RwLock::new(HashMap::new())),
             on_service_discovered_callback,
-        }))
+        })
     }
 
     /// Sets the destination IP address for OSC messages.
