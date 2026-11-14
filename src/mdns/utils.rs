@@ -345,3 +345,91 @@ pub fn extract_service_info(message: &Message) -> Option<(Name, SocketAddr)> {
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hickory_proto::{
+        op::{MessageType, ResponseCode},
+        serialize::binary::BinDecodable,
+    };
+
+    const INSTANCE_NAME: &str = "test_service._osc._udp.local.";
+    const PORT: u16 = 9000;
+
+    fn instance_name() -> Name {
+        Name::from_ascii(INSTANCE_NAME).unwrap()
+    }
+
+    fn announcement(ip: IpAddr) -> Message {
+        create_mdns_response_message(&instance_name(), ip, PORT)
+    }
+
+    fn to_hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[test]
+    fn announcement_is_an_authoritative_response_with_ptr_in_answers() {
+        // VRChat only registers a service when the PTR record sits in the
+        // answer section; see WORKAROUNDS.md, issue 3.
+        let message = announcement(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)));
+
+        assert_eq!(message.metadata.id, 0);
+        assert_eq!(message.metadata.message_type, MessageType::Response);
+        assert_eq!(message.metadata.response_code, ResponseCode::NoError);
+        assert!(message.metadata.authoritative);
+
+        assert_eq!(message.answers.len(), 1);
+        assert!(matches!(&message.answers[0].data, RData::PTR(_)));
+        assert!(!message
+            .additionals
+            .iter()
+            .any(|record| matches!(&record.data, RData::PTR(_))));
+        assert!(message
+            .additionals
+            .iter()
+            .any(|record| matches!(&record.data, RData::SRV(_))));
+        assert!(message
+            .additionals
+            .iter()
+            .any(|record| matches!(&record.data, RData::A(_))));
+    }
+
+    #[test]
+    fn announcement_survives_the_wire_for_both_ip_families() {
+        let ipv4 = Ipv4Addr::new(192, 168, 1, 10);
+        let ipv6 = Ipv6Addr::LOCALHOST;
+
+        for (ip, expected) in [
+            (IpAddr::V4(ipv4), SocketAddr::from((ipv4, PORT))),
+            (IpAddr::V6(ipv6), SocketAddr::from((ipv6, PORT))),
+        ] {
+            let bytes = announcement(ip).to_bytes().unwrap();
+            let received = Message::from_bytes(&bytes).unwrap();
+
+            assert_eq!(
+                extract_service_info(&received),
+                Some((instance_name(), expected))
+            );
+        }
+    }
+
+    #[test]
+    fn announcement_bytes_are_frozen() {
+        // Peers read these packets record by record, so the encoding is part of
+        // the contract with them. When this fails after a dependency bump,
+        // confirm VRChat still registers the service before touching the
+        // expectation.
+        let bytes = announcement(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)))
+            .to_bytes()
+            .unwrap();
+
+        assert_eq!(
+            to_hex(&bytes),
+            "000084000000000100000002045f6f7363045f756470056c6f63616c00000c000100000078000f0c\
+             746573745f73657276696365c00cc027002100010000007800240000000023280c746573745f73\
+             657276696365045f6f7363045f756470056c6f63616c00c02700010001000000780004c0a8010a"
+        );
+    }
+}
