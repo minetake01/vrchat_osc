@@ -2,6 +2,8 @@ mod fetch;
 mod mdns;
 mod oscquery;
 
+/// Exposed because [`Error::HickoryError`] and [`MdnsError`] carry these types.
+pub use hickory_proto;
 pub use oscquery::models;
 pub use rosc;
 
