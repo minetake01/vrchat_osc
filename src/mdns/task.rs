@@ -100,7 +100,7 @@ pub async fn server_task(
         }
 
         // Process the message based on whether it's a query or a response.
-        match message.message_type {
+        match message.metadata.message_type {
             MessageType::Query => {
                 // Handle incoming mDNS queries.
                 handle_query(
