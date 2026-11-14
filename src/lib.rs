@@ -62,6 +62,7 @@ struct ServiceHandle {
 }
 
 /// Represents the type of OSC service discovered.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ServiceType {
     /// OSC service type.
