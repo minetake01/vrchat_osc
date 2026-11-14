@@ -182,9 +182,9 @@ impl Mdns {
     /// * `instance_name` - The unique name of the service instance (e.g., `VRChat-Client-1234._oscjson._tcp.local.`).
     /// * `port` - The port number where the service is hosted.
     ///
-    /// # Returns
-    /// A `Result` indicating success or an `Error` if registration fails.
-    pub async fn register(&self, instance_name: Name, port: u16) -> Result<(), Error> {
+    /// A failed announcement is logged rather than returned: the service stays
+    /// registered and is still announced in answers to later queries.
+    pub async fn register(&self, instance_name: Name, port: u16) {
         let base_service_name = instance_name.trim_to(3);
 
         {
@@ -208,7 +208,6 @@ impl Mdns {
                 e
             );
         }
-        Ok(())
     }
 
     /// Unregisters a previously registered service.
@@ -218,16 +217,13 @@ impl Mdns {
     ///
     /// # Arguments
     /// * `instance_name` - The name of the service instance to unregister.
-    ///
-    /// # Returns
-    /// A `Result` indicating success or an `Error`.
-    pub async fn unregister(&self, instance_name: Name) -> Result<(), Error> {
+    pub async fn unregister(&self, instance_name: &Name) {
         let base_service_name = instance_name.trim_to(3);
 
         let mut services_guard = self.registered_services.write().await;
         let mut removed = false;
         if let Some(instances) = services_guard.get_mut(&base_service_name) {
-            if instances.remove(&instance_name).is_some() {
+            if instances.remove(instance_name).is_some() {
                 log::info!("Unregistered service instance: {}", instance_name);
                 removed = true;
                 if instances.is_empty() {
@@ -246,7 +242,6 @@ impl Mdns {
                 instance_name
             );
         }
-        Ok(())
     }
 
     /// Starts following a specific service type.

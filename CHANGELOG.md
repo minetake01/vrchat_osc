@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name. Patterns passed to `send` and `get_parameter` are matched against the
   instance name; `send` still addresses only OSC services and `get_parameter`
   only OSCQuery services.
+- `register` returns `Error::ServiceAlreadyRegistered` when the name, once
+  sanitized for mDNS, is already registered on the handle.
+- `unregister` and `shutdown` no longer return a `Result`.
 - `send` returns the number of services the packet was addressed to.
 - `get_parameter` returns one entry per matching service with the fetch result
   inside, and no longer wraps the collection in a `Result`.
@@ -38,7 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `register` rolls back the OSC mDNS record and stops the OSC listener when the
-  OSCQuery announcement fails.
+- `register` no longer leaves the OSC listener running when starting the
+  OSCQuery server fails.
+- Registering a name a second time no longer orphans the listener of the first
+  registration.
 - `find_non_loopback_ipv4` documentation no longer claims that link state is
   checked.

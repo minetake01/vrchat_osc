@@ -57,6 +57,8 @@ pub enum Error {
     FetchError(#[from] fetch::Error),
     #[error("No valid network interface found: no non-loopback IPv4 address available")]
     NoValidInterface,
+    #[error("A service is already registered under the mDNS instance name {0}")]
+    ServiceAlreadyRegistered(String),
 }
 
 /// Holds handles related to a registered OSC service.
@@ -65,6 +67,10 @@ struct ServiceHandle {
     osc: JoinHandle<()>,
     /// The OSCQuery server instance.
     osc_query: OscQuery,
+    /// The mDNS name the OSC server is announced under.
+    osc_instance: Name,
+    /// The mDNS name the OSCQuery server is announced under.
+    oscquery_instance: Name,
 }
 
 /// A service discovered on the local network.
@@ -221,6 +227,15 @@ fn discovered_service(name: &Name, addr: SocketAddr) -> Option<ServiceType> {
     }
 }
 
+/// Builds the mDNS name a local service is announced under.
+fn local_service_instance(service_name: &str, service_type: &str) -> Result<Name, Error> {
+    Ok(Name::from_str(&format!(
+        "{}.{}",
+        sanitize_service_name(service_name),
+        service_type
+    ))?)
+}
+
 /// Sanitizes the service name to be compatible with mDNS and VRChat requirements.
 ///
 /// Rules:
@@ -354,10 +369,35 @@ impl VRChatOsc {
     where
         F: Fn(OscPacket) + Send + 'static,
     {
-        // Start OSC server (UDP listener)
-        // Bind to an ephemeral port on all interfaces.
+        // Every step that can fail runs before anything is spawned or announced,
+        // so an error leaves nothing behind to roll back. The write lock is held
+        // throughout so that a concurrent registration cannot claim the same name.
+        let osc_instance = local_service_instance(service_name, OSC_SERVICE_TYPE)?;
+        let oscquery_instance = local_service_instance(service_name, OSCQUERY_SERVICE_TYPE)?;
+
+        let mut handles = self.service_handles.write().await;
+        if handles
+            .values()
+            .any(|handle| handle.osc_instance == osc_instance)
+        {
+            return Err(Error::ServiceAlreadyRegistered(osc_instance.to_utf8()));
+        }
+
+        // Bind the OSC server (UDP listener) to an ephemeral port on all interfaces.
         let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)).await?;
         let osc_local_addr = socket.local_addr()?; // Get the actual address it bound to.
+
+        // Start OSCQuery server (HTTP server)
+        let host_info = HostInfo::new(
+            service_name.to_string(),
+            osc_local_addr.ip(),   // Use the IP of the OSC server.
+            osc_local_addr.port(), // Use the port of the OSC server.
+        );
+        let mut osc_query = OscQuery::new(host_info, parameters);
+        // Serve OSCQuery on an ephemeral port on all interfaces.
+        let osc_query_local_addr = osc_query
+            .serve(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
+            .await?;
 
         // Spawn a task to handle incoming OSC packets.
         let osc_handle = tokio::spawn(async move {
@@ -393,53 +433,21 @@ impl VRChatOsc {
             }
         });
 
-        // Start OSCQuery server (HTTP server)
-        let host_info = HostInfo::new(
-            service_name.to_string(),
-            osc_local_addr.ip(),   // Use the IP of the OSC server.
-            osc_local_addr.port(), // Use the port of the OSC server.
-        );
-        let mut osc_query = OscQuery::new(host_info, parameters);
-        // Serve OSCQuery on an ephemeral port on all interfaces.
-        let osc_query_local_addr = osc_query
-            .serve(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
-            .await?;
-
-        // Create mDNS service announcements.
-        let sanitized_service_name = sanitize_service_name(service_name);
-
-        // Register the OSC and OSCQuery services with mDNS. The pair is
-        // announced together, so a failure on the second one rolls the first
-        // back instead of leaving a half-registered service behind.
-        let osc_service = Name::from_str(&format!("{}._osc._udp.local.", sanitized_service_name))?;
+        // Announce the OSC and OSCQuery services with mDNS.
         self.mdns
-            .register(osc_service.clone(), osc_local_addr.port())
-            .await?;
+            .register(osc_instance.clone(), osc_local_addr.port())
+            .await;
+        self.mdns
+            .register(oscquery_instance.clone(), osc_query_local_addr.port())
+            .await;
 
-        let oscjson_service =
-            Name::from_str(&format!("{}._oscjson._tcp.local.", sanitized_service_name))?;
-        if let Err(register_error) = self
-            .mdns
-            .register(oscjson_service, osc_query_local_addr.port())
-            .await
-        {
-            if let Err(unregister_error) = self.mdns.unregister(osc_service).await {
-                log::warn!(
-                    "Failed to roll back the OSC mDNS registration: {}",
-                    unregister_error
-                );
-            }
-            osc_handle.abort();
-            return Err(register_error.into());
-        }
-
-        // Save service handles for later management (e.g., unregistering).
-        let mut handles = self.service_handles.write().await;
         handles.insert(
             service_name.to_string(),
             ServiceHandle {
                 osc: osc_handle,
                 osc_query,
+                osc_instance,
+                oscquery_instance,
             },
         );
         Ok(())
@@ -448,31 +456,20 @@ impl VRChatOsc {
     /// Unregisters an OSC service and stops its servers.
     ///
     /// # Arguments
-    /// * `service_name` - The name of the service to unregister.
-    pub async fn unregister(&self, service_name: &str) -> Result<(), Error> {
-        let sanitized_service_name = sanitize_service_name(service_name);
-        // Remove the service from our tracking.
-        let mut service_handles_map = self.service_handles.write().await;
-        if let Some(mut service_handle_entry) = service_handles_map.remove(service_name) {
-            // Unregister from mDNS.
-            self.mdns
-                .unregister(Name::from_str(&format!(
-                    "{}._osc._udp.local.",
-                    sanitized_service_name
-                ))?)
-                .await?;
-            self.mdns
-                .unregister(Name::from_str(&format!(
-                    "{}._oscjson._tcp.local.",
-                    sanitized_service_name
-                ))?)
-                .await?;
-
-            // Stop the associated tasks/servers.
-            service_handle_entry.osc.abort(); // Abort the OSC listening task.
-            service_handle_entry.osc_query.shutdown(); // Gracefully shutdown the OSCQuery server.
+    /// * `service_name` - The name the service was registered with.
+    pub async fn unregister(&self, service_name: &str) {
+        let removed = self.service_handles.write().await.remove(service_name);
+        if let Some(handle) = removed {
+            self.stop_service(handle).await;
         }
-        Ok(())
+    }
+
+    /// Withdraws a service from mDNS and stops its servers.
+    async fn stop_service(&self, mut handle: ServiceHandle) {
+        self.mdns.unregister(&handle.osc_instance).await;
+        self.mdns.unregister(&handle.oscquery_instance).await;
+        handle.osc.abort();
+        handle.osc_query.shutdown();
     }
 
     /// Sends an OSC packet to services matching a name pattern.
@@ -583,40 +580,17 @@ impl VRChatOsc {
     /// Shuts down all registered services and cleans up resources.
     /// This method should be called before the VRChatOsc instance is dropped
     /// to ensure graceful shutdown of asynchronous tasks and network services.
-    pub async fn shutdown(&self) -> Result<(), Error> {
-        let mut service_handles_map = self.service_handles.write().await;
-        let service_names: Vec<String> = service_handles_map.keys().cloned().collect();
-
-        for name in service_names {
-            if let Some(mut handle) = service_handles_map.remove(&name) {
-                let sanitized_service_name = sanitize_service_name(&name);
-                // Attempt to unregister from mDNS. Errors are logged but not propagated to allow other services to shut down.
-                if let Err(e) = self
-                    .mdns
-                    .unregister(Name::from_str(&format!(
-                        "{}._osc._udp.local.",
-                        sanitized_service_name
-                    ))?)
-                    .await
-                {
-                    log::error!("Failed to unregister OSC for {}: {}", name, e);
-                }
-                if let Err(e) = self
-                    .mdns
-                    .unregister(Name::from_str(&format!(
-                        "{}._oscjson._tcp.local.",
-                        sanitized_service_name
-                    ))?)
-                    .await
-                {
-                    log::error!("Failed to unregister OSCQuery for {}: {}", name, e);
-                }
-
-                handle.osc.abort();
-                handle.osc_query.shutdown();
-            }
+    pub async fn shutdown(&self) {
+        let removed: Vec<ServiceHandle> = self
+            .service_handles
+            .write()
+            .await
+            .drain()
+            .map(|(_, handle)| handle)
+            .collect();
+        for handle in removed {
+            self.stop_service(handle).await;
         }
-        Ok(())
     }
 
     /// Lists the names of all currently registered services.
@@ -731,5 +705,25 @@ mod tests {
             discovered_service(&name, addr()),
             Some(ServiceType::Osc(Service::new("VRChat-Client-1234", addr())))
         );
+    }
+
+    #[tokio::test]
+    async fn registering_a_taken_name_fails_without_replacing_the_service() {
+        let vrchat_osc = VRChatOsc::new(Some(IpAddr::V4(Ipv4Addr::LOCALHOST)))
+            .await
+            .unwrap();
+        vrchat_osc
+            .register("Test Service", OscRootNode::new(), |_| {})
+            .await
+            .unwrap();
+
+        // Both names sanitize to the same mDNS instance name.
+        let result = vrchat_osc
+            .register("test-service", OscRootNode::new(), |_| {})
+            .await;
+
+        assert!(matches!(result, Err(Error::ServiceAlreadyRegistered(_))));
+        assert_eq!(vrchat_osc.list_services().await, vec!["Test Service"]);
+        vrchat_osc.shutdown().await;
     }
 }

@@ -117,6 +117,6 @@ async fn main() -> Result<(), Error> {
     tokio::signal::ctrl_c().await?;
 
     // Shutdown the VRChatOsc instance
-    vrchat_osc.shutdown().await?;
+    vrchat_osc.shutdown().await;
     Ok(())
 }
