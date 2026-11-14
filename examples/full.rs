@@ -4,7 +4,7 @@ use tokio;
 use vrchat_osc::{
     models::OscRootNode,
     rosc::{OscMessage, OscPacket},
-    Error, ServiceType, VRChatOSC,
+    Error, ServiceType, VRChatOsc,
 };
 
 #[tokio::main]
@@ -13,10 +13,10 @@ async fn main() -> Result<(), Error> {
         .filter_level(log::LevelFilter::Debug)
         .init();
 
-    // Initialize VRChatOSC instance.
+    // Initialize VRChatOsc instance.
     // When None is passed, automatically selects a non-loopback IPv4 interface.
     // Pass Some(IpAddr) to advertise on a specific network interface
-    let vrchat_osc = VRChatOSC::new(None).await?;
+    let vrchat_osc = VRChatOsc::new(None).await?;
 
     let cloned_vrchat_osc = vrchat_osc.clone();
     vrchat_osc
@@ -29,7 +29,7 @@ async fn main() -> Result<(), Error> {
                     vrchat_osc
                         .send_to_addr(
                             OscPacket::Message(OscMessage {
-                                addr: "/avatar/parameters/VRChatOSC".to_string(),
+                                addr: "/avatar/parameters/VRChatOsc".to_string(),
                                 args: vec![rosc::OscType::String("Connected".to_string())],
                             }),
                             addr,
@@ -113,7 +113,7 @@ async fn main() -> Result<(), Error> {
     log::info!("Press Ctrl+C to exit.");
     tokio::signal::ctrl_c().await?;
 
-    // Shutdown the VRChatOSC instance
+    // Shutdown the VRChatOsc instance
     vrchat_osc.shutdown().await?;
     Ok(())
 }

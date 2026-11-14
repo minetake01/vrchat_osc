@@ -17,7 +17,7 @@ pub struct HostInfo {
     /// The port number where the OSC server is listening for messages.
     pub osc_port: u16,
     /// The transport protocol used by the OSC server (e.g., UDP or TCP).
-    pub osc_transport: OSCTransport,
+    pub osc_transport: OscTransport,
 }
 
 impl HostInfo {
@@ -42,14 +42,18 @@ impl HostInfo {
             ]),
             osc_ip,
             osc_port,
-            osc_transport: OSCTransport::UDP, // Defaulting to UDP as it's common for OSC.
+            osc_transport: OscTransport::Udp, // Defaulting to UDP as it's common for OSC.
         }
     }
 }
 
 /// Enumerates the possible OSC transport protocols.
+///
+/// The names serialized into `HOST_INFO` stay `UDP` and `TCP`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OSCTransport {
-    UDP,
-    TCP,
+pub enum OscTransport {
+    #[serde(rename = "UDP")]
+    Udp,
+    #[serde(rename = "TCP")]
+    Tcp,
 }

@@ -33,7 +33,7 @@ use wildmatch::WildMatch;
 
 const OSC_PACKET_BUFFER_SIZE: usize = 65535; // Max UDP packet size
 
-/// Defines the possible errors that can occur within the VRChatOSC library.
+/// Defines the possible errors that can occur within the VRChatOsc library.
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -72,7 +72,7 @@ pub enum ServiceType {
 }
 
 /// Main struct for managing VRChat OSC communication and service discovery.
-pub struct VRChatOSC {
+pub struct VRChatOsc {
     /// Socket for sending OSC messages.
     send_socket: UdpSocket,
     /// The destination IP address for OSC messages (VRChat's IP address).
@@ -92,7 +92,7 @@ pub struct VRChatOSC {
 /// IPv4 address that is not a loopback address is returned. Link state is not
 /// inspected, so on a host with several interfaces (VPNs, virtual adapters) the
 /// result may not be the interface that reaches VRChat. Pass `Some(ip)` to
-/// [`VRChatOSC::new`] when that matters.
+/// [`VRChatOsc::new`] when that matters.
 ///
 /// # Returns
 /// A non-loopback IPv4 address, or None if no suitable interface is found.
@@ -166,13 +166,13 @@ fn sanitize_service_name(name: &str) -> String {
         .collect()
 }
 
-impl VRChatOSC {
-    /// Creates a new `VRChatOSC` instance.
+impl VRChatOsc {
+    /// Creates a new `VRChatOsc` instance.
     ///
     /// # Arguments
     /// * `osc_ip` - Optional destination IP address for OSC messages.
     ///   If `None`, it will attempt to automatically find a suitable network interface.
-    pub async fn new(osc_ip: Option<IpAddr>) -> Result<Arc<VRChatOSC>, Error> {
+    pub async fn new(osc_ip: Option<IpAddr>) -> Result<Arc<VRChatOsc>, Error> {
         let osc_ip = match osc_ip {
             Some(ip) => ip,
             None => find_non_loopback_ipv4().ok_or(Error::NoValidInterface)?,
@@ -222,7 +222,7 @@ impl VRChatOSC {
             }
         });
 
-        Ok(Arc::new(VRChatOSC {
+        Ok(Arc::new(VRChatOsc {
             send_socket: socket,
             osc_ip: Arc::new(RwLock::new(osc_ip)),
             mdns: mdns_client,
@@ -512,7 +512,7 @@ impl VRChatOSC {
     }
 
     /// Shuts down all registered services and cleans up resources.
-    /// This method should be called before the VRChatOSC instance is dropped
+    /// This method should be called before the VRChatOsc instance is dropped
     /// to ensure graceful shutdown of asynchronous tasks and network services.
     pub async fn shutdown(&self) -> Result<(), Error> {
         let mut service_handles_map = self.service_handles.write().await;
@@ -557,7 +557,7 @@ impl VRChatOSC {
     }
 }
 
-impl Drop for VRChatOSC {
+impl Drop for VRChatOsc {
     fn drop(&mut self) {
         // Best-effort synchronous cleanup.
         // For robust cleanup, especially of async tasks and network resources,
@@ -580,7 +580,7 @@ impl Drop for VRChatOSC {
             // For now, we acknowledge that proper async shutdown is preferred.
             if !std::thread::panicking() {
                 // Avoid double panic if already panicking
-                log::warn!("VRChatOSC: Could not acquire lock on service_handles during drop. Explicitly call shutdown() for robust cleanup.");
+                log::warn!("VRChatOsc: Could not acquire lock on service_handles during drop. Explicitly call shutdown() for robust cleanup.");
             }
         }
     }
