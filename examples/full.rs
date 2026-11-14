@@ -89,7 +89,7 @@ async fn main() -> Result<(), Error> {
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     // Send a test message to the registered service
-    vrchat_osc
+    let addressed = vrchat_osc
         .send(
             OscPacket::Message(OscMessage {
                 addr: "/chatbox/input".to_string(),
@@ -101,12 +101,12 @@ async fn main() -> Result<(), Error> {
             "VRChat-Client-*",
         )
         .await?;
-    log::info!("Test message sent to VRChat-Client-*.");
+    log::info!("Test message addressed to {} service(s).", addressed);
 
     // Get parameters from the registered service
     let params = vrchat_osc
         .get_parameter("/avatar/parameters", "VRChat-Client-*")
-        .await?;
+        .await;
     log::info!("Received parameters: {:?}", params);
 
     // Keep the program running to handle incoming messages

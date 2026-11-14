@@ -392,7 +392,10 @@ impl VRChatOSC {
     /// # Arguments
     /// * `packet` - The `OscPacket` to send.
     /// * `to` - A pattern (e.g., "VRChat-Client-*") to match against discovered service names.
-    pub async fn send(&self, packet: OscPacket, to: &str) -> Result<(), Error> {
+    ///
+    /// # Returns
+    /// The number of discovered services the packet was addressed to.
+    pub async fn send(&self, packet: OscPacket, to: &str) -> Result<usize, Error> {
         // Find services matching the pattern. The matching logic is within `find_service`.
         // The closure provided to `find_service` determines if a service (by its Name) matches.
         let services = self
@@ -405,7 +408,7 @@ impl VRChatOSC {
 
         if services.is_empty() {
             log::info!("No mDNS services found matching the expression: {}", to);
-            return Ok(());
+            return Ok(0);
         }
 
         // Encode the OSC packet into bytes.
@@ -415,11 +418,14 @@ impl VRChatOSC {
             .into_iter()
             .map(|(_, addr)| self.send_socket.send_to(&msg_buf, addr));
         let results = futures::future::join_all(send_futs).await;
+
+        let mut addressed = 0;
         for res in results {
             res?;
+            addressed += 1;
         }
 
-        Ok(())
+        Ok(addressed)
     }
 
     /// Sends an OSC packet to a specific socket address.
@@ -440,12 +446,14 @@ impl VRChatOSC {
     /// * `from` - A pattern (e.g., "VRChat-Client-*") to match against discovered service names.
     ///
     /// # Returns
-    /// A list of matching service names and their corresponding parameter values.
+    /// One entry per matching service, pairing the service name with the result of
+    /// fetching the parameter from it. A service that could not be reached, or that
+    /// does not expose `method`, is reported as `Err`.
     pub async fn get_parameter(
         &self,
         method: &str,
         from: &str,
-    ) -> Result<Vec<(String, OscNode)>, Error> {
+    ) -> Vec<(String, Result<OscNode, Error>)> {
         // Find services matching the pattern. The matching logic is within `find_service`.
         // The closure provided to `find_service` determines if a service matches.
         let services = self
@@ -455,37 +463,23 @@ impl VRChatOSC {
             })
             .await;
 
-        if services.is_empty() {
-            log::info!(
-                "No mDNS services found for get_parameter matching expression: {}",
-                from
-            );
-            return Ok(Vec::new());
-        }
-
         // Asynchronously fetch the parameter from all matching services.
         // `stream::iter` creates a stream from the services.
         // `map` transforms each service into a future that fetches the parameter.
         // `buffer_unordered(3)` allows up to 3 fetches to run concurrently.
-        // `filter_map` discards any fetches that resulted in an error.
-        // `collect` gathers all successful results into a Vec.
-        let params = stream::iter(services)
+        // `collect` keeps every result, so callers can tell which service failed.
+        stream::iter(services)
             .map(|(name, addr)| async move {
-                fetch::<_, OscNode>(addr, method)
+                let parameter = fetch::<_, OscNode>(addr, method)
                     .await
-                    .map(|(param, _)| (name.to_utf8(), param))
+                    .map(|(parameter, _)| parameter)
+                    .map_err(Error::from);
+
+                (name.to_utf8(), parameter)
             })
             .buffer_unordered(3)
-            .filter_map(|res| async {
-                if let Err(e) = &res {
-                    log::warn!("Failed to fetch parameter: {:?}", e);
-                }
-                res.ok()
-            })
-            .collect::<Vec<_>>()
-            .await;
-
-        Ok(params)
+            .collect()
+            .await
     }
 
     /// Retrieves a specific parameter from a specific service address.
