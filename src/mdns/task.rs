@@ -91,16 +91,16 @@ pub async fn server_task(
         };
 
         // Ignore messages with error response codes.
-        if message.response_code() != ResponseCode::NoError {
+        if message.metadata.response_code != ResponseCode::NoError {
             log::debug!(
                 "Ignoring mDNS message with response code: {:?}",
-                message.response_code()
+                message.metadata.response_code
             );
             continue;
         }
 
         // Process the message based on whether it's a query or a response.
-        match message.message_type() {
+        match message.message_type {
             MessageType::Query => {
                 // Handle incoming mDNS queries.
                 handle_query(
@@ -150,7 +150,7 @@ async fn handle_query(
     let interface_ip = *advertised_ip.read().await;
 
     // Iterate over each query in the mDNS message.
-    for query in query_message.queries() {
+    for query in &query_message.queries {
         log::trace!(
             "Received mDNS query for service name: {}, type: {:?}, class: {:?}",
             query.name(),

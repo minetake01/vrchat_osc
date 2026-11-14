@@ -6,7 +6,7 @@ use std::{
 use tokio::{net::UdpSocket, sync::RwLock};
 
 use hickory_proto::{
-    op::{Message, MessageType, OpCode},
+    op::{Message, OpCode},
     rr::{
         rdata::{A, AAAA, PTR, SRV},
         Name, RData, Record,
@@ -187,12 +187,9 @@ pub fn create_mdns_response_message(
     interface_ip: IpAddr,
     port: u16,
 ) -> Message {
-    let mut message = Message::new();
-    message
-        .set_id(0)
-        .set_message_type(MessageType::Response)
-        .set_op_code(OpCode::Query)
-        .set_authoritative(true); // Indicates this is an authoritative answer for the records
+    let mut message = Message::response(0, OpCode::Query);
+    // Indicates this is an authoritative answer for the records
+    message.metadata.authoritative = true;
 
     // --- PTR Record (Answer Section) ---
     // Points from the service type name to the service instance name.
@@ -263,26 +260,26 @@ pub fn extract_service_info(message: &Message) -> Option<(Name, SocketAddr)> {
     let mut ip_owner_name: Option<Name> = None;
 
     // Iterate through all records in both Answers and Additional sections.
-    for record in message.answers().iter().chain(message.additionals()) {
-        match record.data() {
+    for record in message.answers.iter().chain(message.additionals.iter()) {
+        match &record.data {
             RData::PTR(ptr_data) => {
                 // PTR record: owner is service_type, data is instance_name
                 if ptr_instance_name.is_none() {
                     ptr_instance_name = Some(ptr_data.0.clone());
-                    log::trace!("Found PTR record: {} -> {}", record.name(), ptr_data.0);
+                    log::trace!("Found PTR record: {} -> {}", record.name, ptr_data.0);
                 }
             }
             RData::SRV(srv_data) => {
                 // SRV record: owner is instance_name (or srv_target_name)
                 if srv_target_name.is_none() && srv_port.is_none() {
-                    srv_target_name = Some(record.name().clone());
-                    srv_port = Some(srv_data.port());
-                    srv_actual_target_host = Some(srv_data.target().clone());
+                    srv_target_name = Some(record.name.clone());
+                    srv_port = Some(srv_data.port);
+                    srv_actual_target_host = Some(srv_data.target.clone());
                     log::trace!(
                         "Found SRV record: {} port {} target {}",
-                        record.name(),
-                        srv_data.port(),
-                        srv_data.target()
+                        record.name,
+                        srv_data.port,
+                        srv_data.target
                     );
                 }
             }
@@ -290,16 +287,16 @@ pub fn extract_service_info(message: &Message) -> Option<(Name, SocketAddr)> {
                 // A record: owner is target_host from SRV (or instance_name)
                 if ip_address.is_none() {
                     ip_address = Some(IpAddr::V4(a_data.0));
-                    ip_owner_name = Some(record.name().clone());
-                    log::trace!("Found A record: {} -> {}", record.name(), a_data.0);
+                    ip_owner_name = Some(record.name.clone());
+                    log::trace!("Found A record: {} -> {}", record.name, a_data.0);
                 }
             }
             RData::AAAA(aaaa_data) => {
                 // AAAA record: owner is target_host from SRV (or instance_name)
                 if ip_address.is_none() {
                     ip_address = Some(IpAddr::V6(aaaa_data.0));
-                    ip_owner_name = Some(record.name().clone());
-                    log::trace!("Found AAAA record: {} -> {}", record.name(), aaaa_data.0);
+                    ip_owner_name = Some(record.name.clone());
+                    log::trace!("Found AAAA record: {} -> {}", record.name, aaaa_data.0);
                 }
             }
             _ => {} // Ignore other record types
