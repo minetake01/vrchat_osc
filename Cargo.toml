@@ -12,12 +12,12 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 log = "0.4"
 thiserror = "2.0"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["net", "rt", "sync", "time"] }
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 axum = "0.8"
-hickory-proto = { version = "0.25", features = ["mdns"] }
+hickory-proto = { version = "0.26", features = ["mdns"] }
 rosc = "0.11"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
@@ -28,3 +28,4 @@ if-addrs = "0.14"
 
 [dev-dependencies]
 env_logger = "0.11"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
