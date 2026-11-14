@@ -36,8 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serialized names are unchanged.
 - `OscNode::r#type` is now `OscNode::osc_type`. The serialized name is unchanged.
 - `Error`, `ServiceType` and the module error enums are `#[non_exhaustive]`.
-- `hickory-proto` is updated to 0.26.
-- tokio's `full` feature is replaced by `net`, `rt`, `sync` and `time`.
+- `hickory-proto` is updated to 0.26, and tokio's `full` feature is replaced
+  by `net`, `rt`, `sync` and `time`, by [@called-d](https://github.com/called-d)
+  in [#16](https://github.com/minetake01/vrchat_osc/pull/16).
 
 ### Fixed
 
@@ -48,4 +49,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `find_non_loopback_ipv4` documentation no longer claims that link state is
   checked.
 - The discovery notification task ends when the mDNS task drops the sender,
-  instead of spinning on a closed channel.
+  instead of spinning on a closed channel. Reported and fixed by
+  [@called-d](https://github.com/called-d) in
+  [#17](https://github.com/minetake01/vrchat_osc/pull/17).
