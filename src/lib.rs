@@ -203,16 +203,14 @@ impl VRChatOSC {
         // This task will own the `discover_notifier_rx` (receiver end of the mpsc channel).
         tokio::spawn(async move {
             // Continuously try to receive messages from the discovery notification channel.
-            loop {
-                if let Some((service_name, socket_addr)) = discover_notifier_rx.recv().await {
-                    let callback_guard = callback_arc_clone.read().await;
-                    // If a callback is registered, invoke it with the service name and address.
-                    if let Some(callback) = callback_guard.as_ref() {
-                        if service_name.trim_to(3).to_utf8() == "_osc._udp.local." {
-                            callback(ServiceType::Osc(service_name.to_utf8(), socket_addr));
-                        } else if service_name.trim_to(3).to_utf8() == "_oscjson._tcp.local." {
-                            callback(ServiceType::OscQuery(service_name.to_utf8(), socket_addr));
-                        }
+            while let Some((service_name, socket_addr)) = discover_notifier_rx.recv().await {
+                let callback_guard = callback_arc_clone.read().await;
+                // If a callback is registered, invoke it with the service name and address.
+                if let Some(callback) = callback_guard.as_ref() {
+                    if service_name.trim_to(3).to_utf8() == "_osc._udp.local." {
+                        callback(ServiceType::Osc(service_name.to_utf8(), socket_addr));
+                    } else if service_name.trim_to(3).to_utf8() == "_oscjson._tcp.local." {
+                        callback(ServiceType::OscQuery(service_name.to_utf8(), socket_addr));
                     }
                 }
             }
