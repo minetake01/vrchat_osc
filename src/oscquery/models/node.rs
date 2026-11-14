@@ -12,6 +12,12 @@ pub struct OscRootNode {
     pub(crate) root: OscNode,
 }
 
+impl Default for OscRootNode {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OscRootNode {
     /// Creates a new, empty `OscRootNode`.
     /// The root node itself is initialized with `full_path = "/"`.
