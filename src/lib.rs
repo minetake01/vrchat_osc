@@ -86,12 +86,13 @@ pub struct VRChatOSC {
         Arc<RwLock<Option<Arc<dyn Fn(ServiceType) + Send + Sync + 'static>>>>,
 }
 
-/// Finds a non-loopback IPv4 interface address that is up.
+/// Finds the first non-loopback IPv4 address among the local interfaces.
 ///
-/// This function enumerates network interfaces and selects one that is:
-/// - IPv4
-/// - Not a loopback address
-/// - In an "up" state
+/// The interfaces are scanned in the order the OS reports them and the first
+/// IPv4 address that is not a loopback address is returned. Link state is not
+/// inspected, so on a host with several interfaces (VPNs, virtual adapters) the
+/// result may not be the interface that reaches VRChat. Pass `Some(ip)` to
+/// [`VRChatOSC::new`] when that matters.
 ///
 /// # Returns
 /// A non-loopback IPv4 address, or None if no suitable interface is found.
