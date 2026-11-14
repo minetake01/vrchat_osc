@@ -53,6 +53,8 @@ vrchat_osc = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
+`vrchat_osc` enables the tokio features its own code needs (`net`, `rt`, `sync`, `time`); the features above are what your binary needs. The bundled example also waits for Ctrl+C with `tokio::signal`, so enable `signal` when you build it.
+
 ## Usage Example
 A basic usage example of this crate can be found in [examples/full.rs](./examples/full.rs).
 
