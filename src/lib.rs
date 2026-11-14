@@ -82,7 +82,7 @@ pub struct Service {
 
 impl Service {
     /// Creates a service from its instance name and address.
-    pub fn new(name: impl Into<String>, addr: SocketAddr) -> Self {
+    pub(crate) fn new(name: impl Into<String>, addr: SocketAddr) -> Self {
         Self {
             name: name.into(),
             addr,
