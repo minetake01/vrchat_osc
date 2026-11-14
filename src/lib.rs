@@ -332,19 +332,30 @@ impl VRChatOSC {
         // Create mDNS service announcements.
         let sanitized_service_name = sanitize_service_name(service_name);
 
-        // Register the OSC and OSCQuery services with mDNS.
+        // Register the OSC and OSCQuery services with mDNS. The pair is
+        // announced together, so a failure on the second one rolls the first
+        // back instead of leaving a half-registered service behind.
+        let osc_service = Name::from_str(&format!("{}._osc._udp.local.", sanitized_service_name))?;
         self.mdns
-            .register(
-                Name::from_str(&format!("{}._osc._udp.local.", sanitized_service_name))?,
-                osc_local_addr.port(),
-            )
+            .register(osc_service.clone(), osc_local_addr.port())
             .await?;
-        self.mdns
-            .register(
-                Name::from_str(&format!("{}._oscjson._tcp.local.", sanitized_service_name))?,
-                osc_query_local_addr.port(),
-            )
-            .await?;
+
+        let oscjson_service =
+            Name::from_str(&format!("{}._oscjson._tcp.local.", sanitized_service_name))?;
+        if let Err(register_error) = self
+            .mdns
+            .register(oscjson_service, osc_query_local_addr.port())
+            .await
+        {
+            if let Err(unregister_error) = self.mdns.unregister(osc_service).await {
+                log::warn!(
+                    "Failed to roll back the OSC mDNS registration: {}",
+                    unregister_error
+                );
+            }
+            osc_handle.abort();
+            return Err(register_error.into());
+        }
 
         // Save service handles for later management (e.g., unregistering).
         let mut handles = self.service_handles.write().await;
