@@ -50,7 +50,7 @@ To use this crate, add the following dependencies to your `Cargo.toml`:
 ```toml
 [dependencies]
 vrchat_osc = "2"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ## Usage Example
