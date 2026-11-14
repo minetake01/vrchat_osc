@@ -448,7 +448,7 @@ impl OscType {
     }
 
     /// Creates an `OscType` from its single character tag string.
-    /// Handles basic types and array types like "[iii]".
+    /// Handles basic types and array types like `"[iii]"`.
     pub fn from_tag(tag_char_or_array_str: &str) -> Option<OscType> {
         if tag_char_or_array_str.starts_with('[')
             && tag_char_or_array_str.ends_with(']')
