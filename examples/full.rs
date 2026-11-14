@@ -31,7 +31,7 @@ async fn main() -> Result<(), Error> {
                     vrchat_osc
                         .send_to_addr(
                             OscPacket::Message(OscMessage {
-                                addr: "/avatar/parameters/VRChatOsc".to_string(),
+                                addr: "/avatar/parameters/VRChatOSC".to_string(),
                                 args: vec![rosc::OscType::String("Connected".to_string())],
                             }),
                             addr,
