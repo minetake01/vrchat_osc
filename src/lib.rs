@@ -297,18 +297,18 @@ impl VRChatOsc {
         // Spawn a new asynchronous task to listen for service discovery notifications.
         // This task will own the `discover_notifier_rx` (receiver end of the mpsc channel).
         tokio::spawn(async move {
-            // Continuously try to receive messages from the discovery notification channel.
-            loop {
-                if let Some((service_name, socket_addr)) = discover_notifier_rx.recv().await {
-                    let Some(service_type) = discovered_service(&service_name, socket_addr) else {
-                        continue;
-                    };
+            // Receive notifications until the mDNS task closes the channel, which
+            // happens when it is dropped, and then let this task end instead of
+            // spinning on `None`.
+            while let Some((service_name, socket_addr)) = discover_notifier_rx.recv().await {
+                let Some(service_type) = discovered_service(&service_name, socket_addr) else {
+                    continue;
+                };
 
-                    let callback_guard = callback_arc_clone.read().await;
-                    // If a callback is registered, invoke it with the discovered service.
-                    if let Some(callback) = callback_guard.as_ref() {
-                        callback(service_type);
-                    }
+                let callback_guard = callback_arc_clone.read().await;
+                // If a callback is registered, invoke it with the discovered service.
+                if let Some(callback) = callback_guard.as_ref() {
+                    callback(service_type);
                 }
             }
         });

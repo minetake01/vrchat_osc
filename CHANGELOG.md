@@ -47,3 +47,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registration.
 - `find_non_loopback_ipv4` documentation no longer claims that link state is
   checked.
+- The discovery notification task ends when the mDNS task drops the sender,
+  instead of spinning on a closed channel.
