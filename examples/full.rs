@@ -19,12 +19,16 @@ async fn main() -> Result<(), Error> {
     // Pass Some(IpAddr) to advertise on a specific network interface
     let vrchat_osc = Arc::new(VRChatOsc::new(None).await?);
 
-    let cloned_vrchat_osc = vrchat_osc.clone();
+    // The callback is stored inside the handle, so it holds a `Weak`: an `Arc`
+    // here would keep the handle alive through its own callback.
+    let weak_vrchat_osc = Arc::downgrade(&vrchat_osc);
     vrchat_osc
         .on_connect(move |res| match res {
             ServiceType::Osc(service) => {
                 log::info!("Connected to OSC server: {}", service);
-                let vrchat_osc = cloned_vrchat_osc.clone();
+                let Some(vrchat_osc) = weak_vrchat_osc.upgrade() else {
+                    return;
+                };
                 let addr = service.addr();
                 // Send a message to the OSC server
                 tokio::spawn(async move {
@@ -43,7 +47,9 @@ async fn main() -> Result<(), Error> {
             }
             ServiceType::OscQuery(service) => {
                 log::info!("Connected to OSCQuery server: {}", service);
-                let vrchat_osc = cloned_vrchat_osc.clone();
+                let Some(vrchat_osc) = weak_vrchat_osc.upgrade() else {
+                    return;
+                };
                 let addr = service.addr();
                 // Get parameters from the OSCQuery server
                 tokio::spawn(async move {

@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `VRChatOsc::new` returns `VRChatOsc` instead of `Arc<VRChatOsc>`. Wrap the
-  handle in an `Arc` when the discovery callback needs to call back into it.
+  handle in an `Arc` when the discovery callback needs to call back into it,
+  and capture a `Weak` in the callback: the handle owns the callback, so an
+  `Arc` captured there keeps the handle from ever being dropped.
 - `ServiceType` carries a `Service` instead of a string holding the full mDNS
   name. Patterns passed to `send` and `get_parameter` are matched against the
   instance name; `send` still addresses only OSC services and `get_parameter`
