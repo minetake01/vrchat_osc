@@ -49,7 +49,7 @@ To use this crate, add the following dependencies to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vrchat_osc = "2"
+vrchat_osc = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
