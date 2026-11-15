@@ -458,13 +458,17 @@ impl VRChatOsc {
     /// # Arguments
     /// * `service_name` - The name the service was registered with.
     pub async fn unregister(&self, service_name: &str) {
-        let removed = self.service_handles.write().await.remove(service_name);
-        if let Some(handle) = removed {
+        let mut handles = self.service_handles.write().await;
+        if let Some(handle) = handles.remove(service_name) {
             self.stop_service(handle).await;
         }
     }
 
     /// Withdraws a service from mDNS and stops its servers.
+    ///
+    /// Callers hold the `service_handles` write lock until this returns. mDNS
+    /// withdraws by name alone, so releasing the lock earlier would let a
+    /// registration of the same name complete in between and be withdrawn here.
     async fn stop_service(&self, mut handle: ServiceHandle) {
         self.mdns.unregister(&handle.osc_instance).await;
         self.mdns.unregister(&handle.oscquery_instance).await;
@@ -581,14 +585,8 @@ impl VRChatOsc {
     /// This method should be called before the VRChatOsc instance is dropped
     /// to ensure graceful shutdown of asynchronous tasks and network services.
     pub async fn shutdown(&self) {
-        let removed: Vec<ServiceHandle> = self
-            .service_handles
-            .write()
-            .await
-            .drain()
-            .map(|(_, handle)| handle)
-            .collect();
-        for handle in removed {
+        let mut handles = self.service_handles.write().await;
+        for (_, handle) in handles.drain() {
             self.stop_service(handle).await;
         }
     }
